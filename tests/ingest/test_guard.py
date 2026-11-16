@@ -9,10 +9,10 @@ def guard() -> InjectionGuard:
     return InjectionGuard()
 
 
-def test_guard_does_not_quarantine_benign_postings(guard: InjectionGuard):
-    for posting in BENIGN_POSTINGS:
-        result = guard.scan(posting)
-        assert not result.quarantined, f"false positive on a clean posting: {posting[:60]!r}..."
+@pytest.mark.parametrize("name", BENIGN_POSTINGS)
+def test_guard_does_not_quarantine_benign_postings(guard: InjectionGuard, name: str):
+    result = guard.scan(BENIGN_POSTINGS[name])
+    assert not result.quarantined, f"false positive on clean posting {name!r}"
 
 
 def test_guard_catch_rate_on_adversarial_postings(guard: InjectionGuard):
@@ -22,18 +22,18 @@ def test_guard_catch_rate_on_adversarial_postings(guard: InjectionGuard):
     only, so the French and German postings are expected misses for now —
     re-tune or revisit (see guard.py's module docstring) if that matters
     before relying on this for the real adversarial set."""
-    caught = [guard.scan(posting).quarantined for posting in ADVERSARIAL_POSTINGS]
+    caught = [guard.scan(posting).quarantined for posting in ADVERSARIAL_POSTINGS.values()]
     catch_rate = sum(caught) / len(caught)
     assert catch_rate >= 0.625, f"catch rate regressed below the measured baseline: {catch_rate}"
 
 
 def test_guard_catches_direct_instruction_override_in_english():
-    result = InjectionGuard().scan(ADVERSARIAL_POSTINGS[0])
+    result = InjectionGuard().scan(ADVERSARIAL_POSTINGS["direct_override_english"])
     assert result.quarantined
 
 
 def test_guard_catches_zero_width_smuggled_instructions():
-    result = InjectionGuard().scan(ADVERSARIAL_POSTINGS[-1])
+    result = InjectionGuard().scan(ADVERSARIAL_POSTINGS["zero_width_smuggling"])
     assert result.quarantined
     flagged_scanners = {r.scanner for r in result.results if r.flagged}
     assert "InvisibleText" in flagged_scanners
@@ -70,6 +70,6 @@ def test_guard_does_not_flag_configured_company_names_as_pii():
 
 
 def test_guard_result_has_one_entry_per_scanner():
-    result = InjectionGuard().scan(BENIGN_POSTINGS[0])
+    result = InjectionGuard().scan(BENIGN_POSTINGS["ml_engineer_zurich"])
     scanner_names = {r.scanner for r in result.results}
     assert scanner_names == {"Anonymize", "InvisibleText", "PromptInjection", "Regex"}

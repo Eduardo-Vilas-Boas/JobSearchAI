@@ -5,6 +5,8 @@ from functools import lru_cache
 
 from llm_guard import scan_prompt
 from llm_guard.input_scanners import Anonymize, InvisibleText, PromptInjection, Regex
+from llm_guard.input_scanners.base import Scanner as InputScanner
+from llm_guard.input_scanners.prompt_injection import MatchType
 from llm_guard.vault import Vault
 
 from jobfit.config import load_companies
@@ -13,12 +15,14 @@ from jobfit.config import load_companies
 # (https://github.com/protectai/rebuff, MIT License, ProtectAI): verb +
 # optional "prior/previous/..." qualifier + object noun, e.g. "ignore
 # previous instructions", "disregard prior context". A credited public
-# pattern, not one written for this project — English only, so it does not
-# cover the French/German phrasings the PromptInjection model was found to
-# miss earlier; that gap should be re-measured against the adversarial set,
-# not assumed fixed.
+# pattern, not one written for this project — English only.
+# `(?i)` is load-bearing: llm_guard's Regex scanner compiles patterns with
+# no flags of its own, so without it this never matches "IGNORE ALL
+# PREVIOUS INSTRUCTIONS" or any other non-lowercase attack — confirmed by
+# running it against the adversarial set and seeing zero matches, including
+# on the one example it's obviously supposed to catch.
 _REBUFF_OVERRIDE_PATTERN = (
-    r"\b(?:ignore|disregard|skip|forget|neglect|overlook|omit|bypass"
+    r"(?i)\b(?:ignore|disregard|skip|forget|neglect|overlook|omit|bypass"
     r"|pay no attention to|do not follow|do not obey)\b"
     r"(?:\s+\w+){0,2}?\s*"
     r"\b(?:prior|previous|preceding|above|foregoing|earlier|initial)?\b\s*"
@@ -111,12 +115,17 @@ class InjectionGuard:
     fully-cleaned result of the whole chain, not just the last scanner.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, scanners: list[InputScanner] | None = None) -> None:
+        """`scanners` overrides the default chain — for unit tests that check
+        the aggregation logic with fake scanners, without loading any models."""
         self._vault = Vault()
-        self._scanners = [
+        self._scanners = scanners if scanners is not None else self._default_scanners()
+
+    def _default_scanners(self) -> list[InputScanner]:
+        return [
             Anonymize(self._vault, allowed_names=_allowed_names()),
             InvisibleText(),
-            PromptInjection(),
+            PromptInjection(match_type=MatchType.SENTENCE),
             Regex(patterns=[_REBUFF_OVERRIDE_PATTERN]),
         ]
 

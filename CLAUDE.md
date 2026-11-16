@@ -39,10 +39,11 @@ uv run pytest tests/ingest/test_dedup.py -v              # one module
 uv run pytest tests/ingest/test_dedup.py::test_content_hash_differs_for_different_locations -v  # one test
 ```
 `tests/ingest/test_pipeline.py` is an integration test and needs the local Postgres running
-(`docker compose up -d`) — it uses the `clean_db` fixture to truncate tables, since there's
-no separate test database. Everything else mocks HTTP via `respx`; no test hits a live API.
-`tests/ingest/test_guard.py` loads the real transformer model (no mocking), so it's slower
-(~3-5s) but deterministic — see the dedup/guard notes below.
+(`docker compose up -d`). Tests run against a separate `_test` database in the same
+container, created and migrated automatically by `tests/conftest.py`, so the suite never
+touches data the CLI ingested. Everything else mocks HTTP via `respx`; no test hits a live API.
+Guard tests come in two kinds: `test_guard_unit.py` checks the guard's own logic with fake
+scanners (fast, no models); `test_guard.py` runs the real models, so it's slower.
 
 Lint/format: `uv run ruff check .` / `uv run ruff format .`. A `PostToolUse` hook
 (`.claude/settings.json`) also auto-runs ruff + pylint via `uvx` after every `Write`/`Edit`
@@ -97,19 +98,17 @@ LLM Guard input scanners run in sequence, each one's sanitized output feeding th
 (zero-width/hidden character stripping) → `PromptInjection`
 (`protectai/deberta-v3-base-prompt-injection-v2`) → `Regex`, seeded with a pattern derived
 from Rebuff's `generateInjectionKeywords()` (https://github.com/protectai/rebuff, MIT,
-ProtectAI) rather than one written for this project. All four run with library defaults
-except Regex's pattern. A posting is quarantined (`Posting.is_quarantined`) if *any* scanner
+ProtectAI) rather than one written for this project. Configuration is kept to library options
+(thresholds, match type, Regex's pattern). A posting is quarantined (`Posting.is_quarantined`) if *any* scanner
 flags it; per-scanner scores are kept in the `guard_results` table (one row per posting per
 scanner) for `jobfit.ui.guard_review`'s review page. Quarantined postings are stored, not
 discarded, so a human can review and release them later.
 
 Known, measured gaps — not assumed, found by running this against real postings:
-- Dropping the old hand-written multilingual regex (removed per the "don't build it yourself"
-  directive) reintroduced a catch-rate gap on French/German adversarial phrasings the ML
-  scanner alone misses; the Rebuff-derived pattern is English only. Current measured catch
-  rate is 5/8 on the hand-written adversarial set (`tests/ingest/test_guard.py`'s
-  `test_guard_catch_rate_on_adversarial_postings` pins this baseline) — below the plan's
-  "catches all 30" target. Revisit once the adversarial set grows past 8.
+- The guard doesn't catch every hand-written adversarial posting, and the Rebuff-derived
+  pattern is English only. `test_guard.py` pins a minimum catch rate as a baseline, not the
+  plan's target. Thresholds and match type should be tuned against real postings (false
+  positives) as well as attacks, not against the small fixture set alone.
 - `Anonymize`'s NER model repeatedly misreads short proper nouns as `PERSON` on real
   postings: Swiss place names ("Geneva") and company names/short-forms ("Sonar" for
   "SonarSource") both false-positived at measured 1.0 confidence before being added to

@@ -1,0 +1,101 @@
+{
+  "jobs": [
+    {
+      "absolute_url": "https://www.scandit.com/careers/job-description/?gh_jid=8236437",
+      "data_compliance": [
+        {
+          "type": "gdpr",
+          "requires_consent": false,
+          "requires_processing_consent": false,
+          "requires_retention_consent": false,
+          "retention_period": null,
+          "demographic_data_consent_applies": false
+        }
+      ],
+      "internal_job_id": 3564195,
+      "location": {
+        "name": "Warsaw"
+      },
+      "metadata": null,
+      "id": 8236437,
+      "updated_at": "2026-11-09T06:16:20-05:00",
+      "requisition_id": "P-26316",
+      "title": "Accounts Payable (A/P) Specialist (6-Month Fixed-Term Contract)",
+      "company_name": "Scandit",
+      "first_published": "2026-09-28T04:23:26-04:00",
+      "language": "en",
+      "application_deadline": null,
+      "content": "&lt;p&gt;&lt;strong&gt;Accounts Payable (A/P) Specialist (6-Month Fixed-Term Contract)&lt;/strong&gt;&lt;/p&gt;\n&lt;p&gt;This is placeholder text standing in for a real job posting. The original description was removed because the posting text belongs to the company.&lt;/p&gt;\n&lt;p&gt;In this role you will work with a small team to plan, build and support the work described in the job title, and you will report to the team lead.&lt;/p&gt;\n&lt;p&gt;We are looking for someone with relevant experience, good communication skills and an interest in learning. Fluency in the language named in the title is a plus where one is given.&lt;/p&gt;\n&lt;p&gt;We offer a competitive salary, flexible working hours, a learning budget and an office in the city listed for this role. Apply through the link below.&lt;/p&gt;",
+      "departments": [
+        {
+          "id": 31155,
+          "name": "Finance",
+          "child_ids": [],
+          "parent_id": null
+        }
+      ],
+      "offices": [
+        {
+          "id": 22696,
+          "name": "Warsaw",
+          "location": "Warsaw, Masovian Voivodeship, Poland",
+          "child_ids": [],
+          "parent_id": 87080
+        }
+      ],
+      "ai_disclaimer": null,
+      "include_ai_disclaimer": null,
+      "ai_opt_out_request_url": null
+    },
+    {
+      "absolute_url": "https://www.scandit.com/careers/job-description/?gh_jid=8278156",
+      "data_compliance": [
+        {
+          "type": "gdpr",
+          "requires_consent": false,
+          "requires_processing_consent": false,
+          "requires_retention_consent": false,
+          "retention_period": null,
+          "demographic_data_consent_applies": false
+        }
+      ],
+      "internal_job_id": 3580852,
+      "location": {
+        "name": "London"
+      },
+      "metadata": null,
+      "id": 8278156,
+      "updated_at": "2026-11-12T09:09:27-05:00",
+      "requisition_id": "001234",
+      "title": "Business Development Representative - French Speaker",
+      "company_name": "Scandit",
+      "first_published": "2026-10-27T05:34:13-04:00",
+      "language": "en",
+      "application_deadline": null,
+      "content": "&lt;p&gt;&lt;strong&gt;Business Development Representative - French Speaker&lt;/strong&gt;&lt;/p&gt;\n&lt;p&gt;This is placeholder text standing in for a real job posting. The original description was removed because the posting text belongs to the company.&lt;/p&gt;\n&lt;p&gt;In this role you will work with a small team to plan, build and support the work described in the job title, and you will report to the team lead.&lt;/p&gt;\n&lt;p&gt;We are looking for someone with relevant experience, good communication skills and an interest in learning. Fluency in the language named in the title is a plus where one is given.&lt;/p&gt;\n&lt;p&gt;We offer a competitive salary, flexible working hours, a learning budget and an office in the city listed for this role. Apply through the link below.&lt;/p&gt;",
+      "departments": [
+        {
+          "id": 60506,
+          "name": "Business Development",
+          "child_ids": [],
+          "parent_id": null
+        }
+      ],
+      "offices": [
+        {
+          "id": 48068,
+          "name": "London ",
+          "location": "London, Greater London, England, United Kingdom",
+          "child_ids": [],
+          "parent_id": 87080
+        }
+      ],
+      "ai_disclaimer": null,
+      "include_ai_disclaimer": null,
+      "ai_opt_out_request_url": null
+    }
+  ],
+  "meta": {
+    "total": 10
+  }
+}

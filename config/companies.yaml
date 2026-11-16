@@ -1,0 +1,34 @@
+# Target companies for ATS ingestion (Section 1).
+#
+# Each entry's `board_token` was verified live against the ATS's public
+# board API (the same endpoint the company uses to embed jobs on its own
+# careers page) before being added here. Add new companies the same way:
+# confirm `GET <api_base>/<board_token>` returns 200 before committing.
+#
+# ats: one of greenhouse, lever (more ATS types land as fetchers are added)
+
+companies:
+  - name: Proton
+    ats: greenhouse
+    board_token: proton
+    canton_hint: GE  # Geneva
+
+  - name: Scandit
+    ats: greenhouse
+    board_token: scandit
+    canton_hint: ZH  # Zurich
+
+  - name: Squirro
+    ats: greenhouse
+    board_token: squirro
+    canton_hint: ZH  # Zurich
+
+  - name: DFINITY
+    ats: greenhouse
+    board_token: dfinity
+    canton_hint: ZH  # Zurich
+
+  - name: SonarSource
+    ats: lever
+    board_token: sonarsource
+    canton_hint: GE  # Geneva

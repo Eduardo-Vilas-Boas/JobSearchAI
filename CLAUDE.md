@@ -26,6 +26,12 @@ Run the ingestion pipeline end to end (fetches from live ATS APIs):
 uv run python -m jobfit.ingest.cli
 ```
 
+Review guard decisions on stored postings (table of scores + verdict per posting, with a
+drill-in to the full guard-formatted text):
+```
+uv run streamlit run src/jobfit/ui/guard_review.py
+```
+
 Tests:
 ```
 uv run pytest tests/                                    # full suite
@@ -49,10 +55,12 @@ Database URL comes from `JOBFIT_DATABASE_URL` in `.env` (see `jobfit.config.Sett
 
 ## Architecture
 
-Pipeline shape, in `jobfit.ingest.pipeline.run_ingest`: **fetch → normalize → redact → guard
-→ dedup → store**, one company at a time, driven by `config/companies.yaml`. Every stage is
-a pure function operating on plain data (no DB, no network) except the fetchers and the
-store calls — that's what keeps the test suite fast and fixture-based.
+Pipeline shape, in `jobfit.ingest.pipeline.run_ingest`: **fetch → normalize → guard → dedup →
+store**, one company at a time, driven by `config/companies.yaml`. Every stage is a pure
+function operating on plain data (no DB, no network) except the fetchers and the store calls
+— that's what keeps the test suite fast and fixture-based. PII redaction is not a separate
+step: it's the guard's `Anonymize` scanner (see below) — there used to be a hand-written
+`redact.py` doing this with regex, removed in favor of the off-the-shelf scanner.
 
 **Fetchers** (`jobfit.ingest.fetchers`): one class per ATS type (`greenhouse.py`, `lever.py`),
 selected at runtime via `registry.get_fetcher(ats)`. Both hit the ATS's *public, unauthenticated
@@ -82,13 +90,36 @@ not the first design:
   — this is what makes signatures comparable across separate runs/processes. Don't pass a
   custom seed without re-checking this.
 
-**Guard** (`jobfit.ingest.guard`) is a hybrid, not just the off-the-shelf scanner: LLM Guard's
-`PromptInjection` scanner (`protectai/deberta-v3-base-prompt-injection-v2`, loaded once via
-`get_guard()`'s `lru_cache`) plus a multilingual (EN/FR/DE) regex layer for phrasings the ML
-scanner missed in testing — it caught 5/8 of a hand-written adversarial set alone (missed
-German-language injections and non-imperative "scoring override" framings); the regex layer
-brings that to 8/8. A posting is quarantined (`Posting.is_quarantined`) if *either* signal
-fires — it's stored, not discarded, so a human can review and release it later.
+**Guard** (`jobfit.ingest.guard`) is off-the-shelf only, by design — the project plan
+explicitly says "don't build your own sanitiser, use LLM Guard, only tune thresholds." Four
+LLM Guard input scanners run in sequence, each one's sanitized output feeding the next:
+`Anonymize` (PII redaction, replaces the old hand-written `redact.py`) → `InvisibleText`
+(zero-width/hidden character stripping) → `PromptInjection`
+(`protectai/deberta-v3-base-prompt-injection-v2`) → `Regex`, seeded with a pattern derived
+from Rebuff's `generateInjectionKeywords()` (https://github.com/protectai/rebuff, MIT,
+ProtectAI) rather than one written for this project. All four run with library defaults
+except Regex's pattern. A posting is quarantined (`Posting.is_quarantined`) if *any* scanner
+flags it; per-scanner scores are kept in the `guard_results` table (one row per posting per
+scanner) for `jobfit.ui.guard_review`'s review page. Quarantined postings are stored, not
+discarded, so a human can review and release them later.
+
+Known, measured gaps — not assumed, found by running this against real postings:
+- Dropping the old hand-written multilingual regex (removed per the "don't build it yourself"
+  directive) reintroduced a catch-rate gap on French/German adversarial phrasings the ML
+  scanner alone misses; the Rebuff-derived pattern is English only. Current measured catch
+  rate is 5/8 on the hand-written adversarial set (`tests/ingest/test_guard.py`'s
+  `test_guard_catch_rate_on_adversarial_postings` pins this baseline) — below the plan's
+  "catches all 30" target. Revisit once the adversarial set grows past 8.
+- `Anonymize`'s NER model repeatedly misreads short proper nouns as `PERSON` on real
+  postings: Swiss place names ("Geneva") and company names/short-forms ("Sonar" for
+  "SonarSource") both false-positived at measured 1.0 confidence before being added to
+  `allowed_names` (a real Presidio `allow_list` exemption, not a custom recognizer).
+  `_SWISS_PLACE_NAMES` is a static list in `guard.py`; company names/`aliases` come live from
+  `config/companies.yaml` via `CompanyConfig.aliases` — add a short form there (see
+  `SonarSource`'s entry) if a new company's postings false-positive the same way. Not every
+  false positive found this way got chased down: templated page furniture (social-share-icon
+  labels) and at least one US-state-abbreviation-as-`CRYPTO` miss are known, accepted residual
+  gaps rather than further custom detection code.
 
 **Idempotency**: re-running the pipeline against the same postings stores nothing new.
 `find_existing_posting` checks `(source_id, external_id)` before any processing runs for that
@@ -97,16 +128,10 @@ Postgres gives no row-order guarantee, and which existing posting "wins" as cano
 new posting matches more than one near-dup candidate would differ between runs.
 
 **Storage**: Postgres + pgvector via Alembic migrations (`companies`, `sources`, `postings`,
-`ingest_runs`). pgvector is enabled on the dev DB now but not yet used by anything in this
-section — it's reserved for the embeddings work in the ranking section. Raw ATS payloads are
-kept as a JSON column on `Posting` rather than in S3; that's a deliberate "local-first" choice
-for this stage, not a placeholder for one not yet wired up.
-
-## Repo quirk worth knowing
-
-This directory's git root is `/Users/a_` (your home directory), not this project folder —
-`git status`/`git log` here therefore reflect the whole home directory's state, not just this
-repo. Nothing is committed yet. Be careful with any broad `git add`/`commit` run from here.
+`ingest_runs`, `guard_results`). pgvector is enabled on the dev DB now but not yet used by
+anything in this section — it's reserved for the embeddings work in the ranking section. Raw
+ATS payloads are kept as a JSON column on `Posting` rather than in S3; that's a deliberate
+"local-first" choice for this stage, not a placeholder for one not yet wired up.
 
 ## Tests
 

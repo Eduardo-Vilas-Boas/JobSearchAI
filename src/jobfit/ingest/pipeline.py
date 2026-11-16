@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from jobfit.config import CompanyConfig
-from jobfit.db.models import IngestRun, Posting
+from jobfit.db.models import GuardResult, IngestRun, Posting
 from jobfit.db.session import get_session
 from jobfit.db.store import (
     find_existing_posting,
@@ -16,7 +16,6 @@ from jobfit.ingest.dedup import content_hash, is_near_duplicate, minhash_signatu
 from jobfit.ingest.fetchers.registry import get_fetcher
 from jobfit.ingest.guard import InjectionGuard, get_guard
 from jobfit.ingest.normalize import detect_language, html_to_text, normalize_unicode
-from jobfit.ingest.redact import redact_pii
 
 
 @dataclass
@@ -81,9 +80,11 @@ def _ingest_company(
         if find_existing_posting(session, source.id, raw.external_id) is not None:
             continue  # already stored by an earlier run — idempotent no-op
 
-        text = redact_pii(normalize_unicode(html_to_text(raw.description_html)))
-        full_text_for_hashing = f"{raw.title}\n{text}"
-        signature = minhash_signature(full_text_for_hashing)
+        normalized_body = normalize_unicode(html_to_text(raw.description_html))
+        guard_result = guard.scan(f"{raw.title}\n{normalized_body}")
+        text = guard_result.sanitized_text  # PII redacted, injection phrases stripped
+
+        signature = minhash_signature(text)
         hash_key = content_hash(raw.title, raw.company, raw.location)
 
         duplicate_of = _find_duplicate(
@@ -93,7 +94,6 @@ def _ingest_company(
             stats.exact_duplicates += 1 if duplicate_of.content_hash == hash_key else 0
             stats.near_duplicates += 1 if duplicate_of.content_hash != hash_key else 0
 
-        guard_result = guard.scan(f"{raw.title}\n{text}")
         if guard_result.quarantined:
             stats.quarantined += 1
 
@@ -109,7 +109,6 @@ def _ingest_company(
             content_hash=hash_key,
             minhash_signature=signature,
             is_quarantined=guard_result.quarantined,
-            guard_flags=guard_result.flags,
             is_duplicate_of=duplicate_of.id if duplicate_of else None,
             raw_payload=raw.raw_payload,
             posted_at=raw.posted_at,
@@ -117,6 +116,17 @@ def _ingest_company(
         )
         session.add(posting)
         session.flush()
+
+        for scanner_result in guard_result.results:
+            session.add(
+                GuardResult(
+                    posting_id=posting.id,
+                    scanner=scanner_result.scanner,
+                    score=scanner_result.score,
+                    flagged=scanner_result.flagged,
+                )
+            )
+
         stats.stored += 1
 
         if duplicate_of is None:

@@ -8,7 +8,7 @@ from sqlalchemy import select
 from jobfit.config import CompanyConfig
 from jobfit.db.models import Posting
 from jobfit.db.session import get_session
-from jobfit.ingest.guard import GuardResult, InjectionGuard
+from jobfit.ingest.guard import GuardScanResult, InjectionGuard
 from jobfit.ingest.pipeline import run_ingest
 
 FIXTURES = Path(__file__).parent.parent / "fixtures"
@@ -25,8 +25,8 @@ class _FakeGuard(InjectionGuard):
     def __init__(self) -> None:
         pass
 
-    def scan(self, text: str) -> GuardResult:  # noqa: ARG002
-        return GuardResult(quarantined=False, risk_score=-1.0, flags=[])
+    def scan(self, text: str) -> GuardScanResult:
+        return GuardScanResult(quarantined=False, sanitized_text=text, results=[])
 
 
 def _mock_ats_endpoints():

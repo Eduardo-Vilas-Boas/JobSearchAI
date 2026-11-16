@@ -13,6 +13,9 @@ def clean_db():
     """
     with get_session() as session:
         session.execute(
-            text("TRUNCATE postings, ingest_runs, companies, sources RESTART IDENTITY CASCADE")
+            text(
+                "TRUNCATE guard_results, postings, ingest_runs, companies, sources "
+                "RESTART IDENTITY CASCADE"
+            )
         )
     yield

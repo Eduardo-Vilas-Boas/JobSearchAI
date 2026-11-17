@@ -1,8 +1,33 @@
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.egg-info/
+build/
+dist/
 .venv/
-.env
+
+# Tool caches
 .ruff_cache/
 .pytest_cache/
-*.egg-info/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Secrets and local config
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+.claude/settings.local.json
+
+# Local data (raw ATS payloads go to data/raw via Settings.raw_storage_dir)
+data/
+
+# Editors and OS
+.idea/
 .DS_Store
+*.log
+
+# Editor settings (personal)
+.vscode/

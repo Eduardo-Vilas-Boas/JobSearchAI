@@ -92,10 +92,12 @@ not the first design:
   custom seed without re-checking this.
 
 **Guard** (`jobfit.ingest.guard`) is off-the-shelf only, by design — the project plan
-explicitly says "don't build your own sanitiser, use LLM Guard, only tune thresholds." Four
+explicitly says "don't build your own sanitiser, use LLM Guard, only tune thresholds." Five
 LLM Guard input scanners run in sequence, each one's sanitized output feeding the next:
 `Anonymize` (PII redaction, replaces the old hand-written `redact.py`) → `InvisibleText`
-(zero-width/hidden character stripping) → `PromptInjection`
+(zero-width/hidden character stripping) → `Language` (English only — applications are English
+only, so non-English postings are quarantined; FULL match type, since SENTENCE quarantines
+English postings over one German line) → `PromptInjection`
 (`protectai/deberta-v3-base-prompt-injection-v2`) → `Regex`, seeded with a pattern derived
 from Rebuff's `generateInjectionKeywords()` (https://github.com/protectai/rebuff, MIT,
 ProtectAI) rather than one written for this project. Configuration is kept to library options

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 
 from llm_guard import scan_prompt
-from llm_guard.input_scanners import Anonymize, InvisibleText, PromptInjection, Regex
+from llm_guard.input_scanners import Anonymize, InvisibleText, Language, PromptInjection, Regex
 from llm_guard.input_scanners.base import Scanner as InputScanner
 from llm_guard.input_scanners.prompt_injection import MatchType
 from llm_guard.vault import Vault
@@ -103,16 +103,18 @@ class GuardScanResult:
 class InjectionGuard:
     """Runs postings through LLM Guard's off-the-shelf input scanners.
 
-    No custom detection logic: PromptInjection and InvisibleText run with
-    their library defaults, Anonymize's PII detection is its own default NER
-    model, and Regex is seeded with a credited public pattern rather than one
-    written for this project. A posting is quarantined if any scanner flags
-    it — stored, not discarded, so a human can review and release it.
+    No custom detection logic: PromptInjection, InvisibleText and Language
+    run with their library defaults (Language restricted to English),
+    Anonymize's PII detection is its own default NER model, and Regex is
+    seeded with a credited public pattern rather than one written for this
+    project. A posting is quarantined if any scanner flags it — stored, not
+    discarded, so a human can review and release it.
 
     Scanners run in sequence and each one's sanitized output feeds the next
     (Anonymize's PII redaction happens before InvisibleText's character
-    stripping, before the injection checks), so `sanitized_text` is the
-    fully-cleaned result of the whole chain, not just the last scanner.
+    stripping, before the language and injection checks), so
+    `sanitized_text` is the fully-cleaned result of the whole chain, not
+    just the last scanner.
     """
 
     def __init__(self, scanners: list[InputScanner] | None = None) -> None:
@@ -125,6 +127,12 @@ class InjectionGuard:
         return [
             Anonymize(self._vault, allowed_names=_allowed_names()),
             InvisibleText(),
+            # Applications are English only, so any other language is
+            # quarantined. FULL (the library default) classifies the whole
+            # posting (first 512 tokens), not each sentence: SENTENCE mode
+            # would quarantine English postings for a single German line
+            # like "Arbeitsort: Zürich", common in Swiss postings.
+            Language(valid_languages=["en"]),
             PromptInjection(match_type=MatchType.SENTENCE),
             Regex(patterns=[_REBUFF_OVERRIDE_PATTERN]),
         ]

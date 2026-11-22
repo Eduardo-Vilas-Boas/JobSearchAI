@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+import uuid
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+
+from datasketch import MinHash
 
 from jobfit.config import CompanyConfig
 from jobfit.db.models import GuardResult, IngestRun, Posting
@@ -15,10 +18,15 @@ from jobfit.db.store import (
     mark_closed_postings,
 )
 from jobfit.ingest.anonymize import Anonymizer, get_anonymizer
-from jobfit.ingest.dedup import content_hash, is_near_duplicate, minhash_signature
-from jobfit.ingest.fetchers.base import Fetcher
+from jobfit.ingest.dedup import (
+    body_signature,
+    boilerplate_lines,
+    content_hash,
+    is_near_duplicate,
+)
+from jobfit.ingest.fetchers.base import Fetcher, RawPosting
 from jobfit.ingest.fetchers.registry import get_fetcher
-from jobfit.ingest.guard import InjectionGuard, get_guard
+from jobfit.ingest.guard import GuardScanResult, InjectionGuard, get_guard
 from jobfit.ingest.normalize import detect_language, posting_text
 
 
@@ -28,6 +36,7 @@ class RunStats:
     stored: int = 0
     exact_duplicates: int = 0
     near_duplicates: int = 0
+    blocked: int = 0
     quarantined: int = 0
     errors: list[str] = field(default_factory=list)
 
@@ -37,6 +46,7 @@ def run_ingest(
     guard: InjectionGuard | None = None,
     anonymizer: Anonymizer | None = None,
     fetchers: Mapping[str, Fetcher] | None = None,
+    blocked_companies: Collection[str] = (),
 ) -> RunStats:
     """Fetches, cleans and stores postings for every configured company.
 
@@ -47,10 +57,14 @@ def run_ingest(
 
     `fetchers` maps an ATS type to the fetcher to use for it; by default
     each company's fetcher comes from the registry (live HTTP).
+
+    Postings whose company is in `blocked_companies` (case and spacing
+    ignored) are skipped before any processing and never stored.
     """
     guard = guard or get_guard()
     anonymizer = anonymizer or get_anonymizer()
     stats = RunStats()
+    blocked = frozenset(_company_key(name) for name in blocked_companies)
 
     with get_session() as session:
         ingest_run = IngestRun(started_at=datetime.now(UTC))
@@ -69,6 +83,7 @@ def run_ingest(
                     guard,
                     anonymizer,
                     fetchers,
+                    blocked,
                     stats,
                 )
             except Exception as exc:  # noqa: BLE001 - one bad company shouldn't kill the run
@@ -91,6 +106,7 @@ def _ingest_company(
     guard: InjectionGuard,
     anonymizer: Anonymizer,
     fetchers: Mapping[str, Fetcher] | None,
+    blocked: frozenset[str],
     stats: RunStats,
 ) -> None:
     if fetchers is None:
@@ -105,7 +121,11 @@ def _ingest_company(
 
     # Every posting this run finds on the board gets the same timestamp.
     now = ingest_run.started_at
+    new_postings: list[tuple[RawPosting, GuardScanResult]] = []
     for raw in raw_postings:
+        if _company_key(raw.company) in blocked:
+            stats.blocked += 1
+            continue
         existing = find_existing_posting(session, source.id, raw.external_id)
         if existing is not None:
             # Already stored by an earlier run: only its lifecycle dates
@@ -113,17 +133,26 @@ def _ingest_company(
             existing.last_seen = now
             existing.closed_at = None  # back on the board, if it had left
             continue
-
         # PII redacted first, so the guard (and later the LLM) never sees it.
         redacted = anonymizer.anonymize(posting_text(raw.title, raw.description_html))
-        guard_result = guard.scan(redacted)
-        text = guard_result.sanitized_text  # PII redacted, hidden characters stripped
+        new_postings.append((raw, guard.scan(redacted)))
 
-        signature = minhash_signature(text)
+    # Duplicates are only looked for within the company, and its template is
+    # learned from all of its postings: stored ones and this run's new ones.
+    company_canonicals = [p for p in canonical_postings if p.company_id == company.id]
+    boilerplate = boilerplate_lines(
+        [(p.title, p.normalized_text) for p in company_canonicals]
+        + [(raw.title, scan.sanitized_text) for raw, scan in new_postings]
+    )
+    signatures = {p.id: body_signature(p.normalized_text, boilerplate) for p in company_canonicals}
+
+    for raw, guard_result in new_postings:
+        text = guard_result.sanitized_text  # PII redacted, hidden characters stripped
+        signature = body_signature(text, boilerplate)
         hash_key = content_hash(raw.title, raw.company, raw.location)
 
         duplicate_of = _find_duplicate(
-            raw.title, hash_key, signature, raw.location, canonical_postings
+            raw.title, hash_key, signature, raw.location, company_canonicals, signatures
         )
         if duplicate_of is not None:
             stats.exact_duplicates += 1 if duplicate_of.content_hash == hash_key else 0
@@ -142,7 +171,6 @@ def _ingest_company(
             language=detect_language(text),
             normalized_text=text,
             content_hash=hash_key,
-            minhash_signature=signature,
             is_quarantined=guard_result.quarantined,
             is_duplicate_of=duplicate_of.id if duplicate_of else None,
             raw_payload=raw.raw_payload,
@@ -167,6 +195,8 @@ def _ingest_company(
 
         if duplicate_of is None:
             canonical_postings.append(posting)
+            company_canonicals.append(posting)
+            signatures[posting.id] = signature
 
     # Only reached when the fetch succeeded, so a board that fails to load
     # never closes its postings.
@@ -175,22 +205,28 @@ def _ingest_company(
     )
 
 
+def _company_key(name: str) -> str:
+    """How company names are matched against the blocklist: case and spacing ignored."""
+    return " ".join(name.casefold().split())
+
+
 def _find_duplicate(
     title: str,
     hash_key: str,
-    signature: list[int],
+    signature: MinHash | None,
     location: str | None,
-    canonical_postings: list[Posting],
+    company_canonicals: list[Posting],
+    signatures: dict[uuid.UUID, MinHash | None],
 ) -> Posting | None:
-    for existing in canonical_postings:
+    for existing in company_canonicals:
         if existing.content_hash == hash_key:
             return existing
-    for existing in canonical_postings:
-        if existing.minhash_signature and is_near_duplicate(
+    for existing in company_canonicals:
+        if is_near_duplicate(
             title,
             signature,
             existing.title,
-            existing.minhash_signature,
+            signatures[existing.id],
             location,
             existing.location_raw,
         ):

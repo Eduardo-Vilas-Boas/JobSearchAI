@@ -70,8 +70,9 @@ checks one real board per ATS. Only the live test notices an ATS changing its fo
 Guard tests come in two kinds: `test_guard_unit.py` checks the guard's own logic with fake
 scanners (fast, no models); `test_guard.py` runs the real model on hand-written fixtures
 (`tests/fixtures/adversarial_postings.json`), so it's slower. Its catch rate is a baseline,
-not a target. `test_anonymize.py` runs the real Presidio recognizers. There are no
-duplicate-detection tests, by decision (see Dedup).
+not a target. `test_anonymize.py` runs the real Presidio recognizers. Duplicate detection is tested
+through the pipeline (`test_pipeline.py`, postings built from one shared company template)
+and `test_locations.py`.
 
 Lint/format: `uv run ruff check .` / `uv run ruff format .`. A `PostToolUse` hook
 (`.claude/settings.json`) also auto-runs ruff + pylint via `uvx` after every `Write`/`Edit`
@@ -114,27 +115,44 @@ nor Lever ships an official SDK for this, so these are thin `httpx` clients writ
 real response shapes (recorded as fixtures in `tests/fixtures/`). Gotcha: Greenhouse's `content`
 field is **double HTML-escaped** (literal `&lt;p&gt;` text, not a real tag) — `normalize.html_to_text`
 calls `html.unescape()` before parsing to handle this; don't remove that without checking.
+Lever splits a posting into `description` (often just the company intro), `lists`
+(responsibilities, requirements) and `additional`; `lever._description_html` joins all three
+in page order, since the role is mostly in the last two.
 
 Only add a company to `config/companies.yaml` after confirming its board endpoint actually
 returns 200 — every current entry was verified live before being committed, not guessed. A
 board can return 200 with no postings (Squirro and DFINITY did on 2026-11-22).
 
-**Dedup** (`jobfit.ingest.dedup`) is two-layer and both layers are location-aware:
+**Blocked companies**: `blocked_companies` in `config/companies.yaml` lists consultancies
+and agencies whose postings are skipped before any processing and never stored (counted in
+`RunStats.blocked`). Matched against each posting's own `company` field, ignoring case and
+spacing. It only matters for boards that list several companies' jobs; the current ATS
+boards list only their own.
+
+**Dedup** (`jobfit.ingest.dedup`) only compares postings of the same company (`company_id`,
+so the same company on two ATSs is one company). Two layers:
 - Exact: `content_hash(title, company, location)`. Title+company alone collapses genuinely
   different open reqs (same role title posted separately per city) into one — location is
   part of the key for that reason.
-- Near-dup: MinHash over word shingles, gated by *both* title-word-overlap and
-  location-non-conflict before the body-Jaccard check fires. Without the title gate, two
-  different roles at the same company can share 90%+ of their body text purely from shared
-  company boilerplate. Without the location gate, identically-templated postings for the
-  same title in different cities get wrongly collapsed. Both were added after real false
-  positives on live postings.
-- Locations are compared as plain lowercased strings, so "Zurich" and "Zurich, Metropolitan
-  Area" count as different and both postings are kept. Accepted by the user: occasional
-  duplicates are fine, and there are no dedup tests by decision.
-- `MinHash` (datasketch) is constructed with its **fixed default seed (1)**, not a random one
-  — this is what makes signatures comparable across separate runs/processes. Don't pass a
-  custom seed without re-checking this.
+- Near-dup: MinHash over word shingles of the posting *with its company's boilerplate
+  removed*, gated by title-word-overlap and location-non-conflict. Boilerplate
+  (`boilerplate_lines`) is every line found in postings for at least 3 distinct titles and
+  20% of the company's titles, learned each run from the company's stored and new postings;
+  below 5 distinct titles nothing is stripped. Counting per distinct title, not per posting,
+  keeps a role posted in many cities from looking like boilerplate. A posting with fewer
+  than 20 words left after stripping is never a near-dup (only an exact one). Signatures are
+  computed per run, not stored, since they depend on the company's current postings.
+- Locations (`jobfit.ingest.locations`) are compared as sets of places: each `,;/|` piece is
+  looked up in `geonamescache` (Zurich = Zürich; an ambiguous name goes to its most populous
+  city), country and US-state names/codes are dropped as qualifiers, "Remote ..." is its own
+  place, unrecognised text is kept as text. Two postings can only be duplicates if both
+  locations name the same set of places; a missing location matches only another missing
+  one. The user's rule: the same
+  role in another city, or in an extra city, can be a different team, so it's kept.
+- The title gate still matters for companies with too few postings to learn a template
+  from: without it, different roles can share 90%+ of their text through boilerplate.
+- `MinHash` (datasketch) is constructed with its **fixed default seed (1)**, not a random one.
+  Don't pass a custom seed without re-checking this.
 
 **Guard** (`jobfit.ingest.guard`) is off-the-shelf models with their default decisions: no
 threshold tuning, by the user's decision (there are no real attacked postings to tune on). It

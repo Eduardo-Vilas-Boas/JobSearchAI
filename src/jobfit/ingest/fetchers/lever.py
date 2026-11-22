@@ -36,8 +36,23 @@ class LeverFetcher:
             company=company,
             title=posting["text"],
             location=", ".join((posting.get("categories") or {}).get("allLocations") or []) or None,
-            description_html=posting.get("description") or "",
+            description_html=_description_html(posting),
             raw_payload=posting,
             posted_at=posted_at,
             url=posting["hostedUrl"],
         )
+
+
+def _description_html(posting: dict) -> str:
+    """The whole posting body, as the careers page shows it.
+
+    Lever splits it into `description` (often only the company intro),
+    `lists` (headed sections such as responsibilities and requirements, each
+    `content` a run of <li> items) and `additional` (closing text). The role
+    is mostly in the last two, so all three are joined, in page order.
+    """
+    parts = [posting.get("description") or ""]
+    for section in posting.get("lists") or []:
+        parts.append(f"<h3>{section.get('text') or ''}</h3><ul>{section.get('content') or ''}</ul>")
+    parts.append(posting.get("additional") or "")
+    return "\n".join(part for part in parts if part)

@@ -82,7 +82,6 @@ class Posting(Base):
     normalized_text: Mapped[str]
     # exact-dup key: hash(title + company + location)
     content_hash: Mapped[str] = mapped_column(index=True)
-    minhash_signature: Mapped[list[int] | None] = mapped_column(JSON)  # near-dup key
 
     is_quarantined: Mapped[bool] = mapped_column(default=False)
 

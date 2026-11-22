@@ -51,4 +51,22 @@ def test_lever_fetcher_maps_recorded_response():
     # Lever's createdAt is epoch milliseconds.
     assert first.posted_at == datetime.fromtimestamp(1793102018.254, tz=UTC)
     assert first.url.startswith("https://")
-    assert first.description_html
+
+
+def test_lever_description_keeps_every_section_in_page_order():
+    """Lever splits a posting into `description` (often just the company
+    intro), `lists` (responsibilities, requirements) and `additional`. The
+    role itself is mostly in the last two, so all of them must be kept."""
+    (first, _) = LeverFetcher(_client_serving("lever_sonarsource.json")).fetch(
+        "sonarsource", "SonarSource"
+    )
+
+    sections = [
+        "This is placeholder text standing in for a real job posting.",
+        "Placeholder list heading",
+        "Placeholder item one",
+        "Placeholder item two",
+        "Placeholder closing section.",
+    ]
+    positions = [first.description_html.find(section) for section in sections]
+    assert -1 not in positions and positions == sorted(positions)

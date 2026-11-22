@@ -22,6 +22,11 @@ def load_companies(path: Path = DEFAULT_COMPANIES_PATH) -> list[CompanyConfig]:
     return [CompanyConfig.model_validate(entry) for entry in data["companies"]]
 
 
+def load_blocked_companies(path: Path = DEFAULT_COMPANIES_PATH) -> list[str]:
+    data = yaml.safe_load(path.read_text())
+    return data.get("blocked_companies") or []
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="JOBFIT_", env_file=".env")
 

@@ -32,3 +32,11 @@ companies:
     ats: lever
     board_token: sonarsource
     canton_hint: GE  # Geneva
+
+# Companies whose postings are skipped, never stored: consultancies and
+# recruitment agencies that post on behalf of clients. Matched against the
+# company named on each posting, ignoring case and spacing, so list each
+# spelling a board uses. Has no effect on the ATS boards above, which only
+# list their own company's jobs; it applies to boards that list several
+# companies' jobs.
+blocked_companies: []

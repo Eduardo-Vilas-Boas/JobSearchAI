@@ -11,6 +11,7 @@ from sqlalchemy import select
 from jobfit.config import CompanyConfig
 from jobfit.db.models import GuardResult, Posting
 from jobfit.db.session import get_session
+from jobfit.db.store import set_status
 from jobfit.ingest.guard import InjectionGuard
 from jobfit.ingest.pipeline import run_ingest
 from tests.fakes import FakeAnonymizer, FakeFetcher, fake_scanner, raw_posting
@@ -132,4 +133,81 @@ def test_each_scanners_result_is_stored_per_posting(clean_db):
         ("a1", "Detector", 1.0, True),
         ("a2", "Clean", -0.5, False),
         ("a2", "Detector", -1.0, False),
+    ]
+
+
+def test_new_postings_start_as_new_and_on_the_board(clean_db):
+    _ingest([ACME], {"acme": [raw_posting("a1")]})
+
+    (posting,) = _stored()
+    assert (posting.status, posting.status_changed_at, posting.closed_at) == ("new", None, None)
+
+
+def test_rerun_updates_last_seen_of_postings_still_on_the_board(clean_db):
+    boards = {"acme": [raw_posting("a1")]}
+    _ingest([ACME], boards)
+    (first,) = _stored()
+
+    _ingest([ACME], boards)
+
+    (second,) = _stored()
+    assert second.last_seen > first.last_seen
+
+
+def test_posting_gone_from_its_board_is_closed(clean_db):
+    _ingest([ACME], {"acme": [raw_posting("a1"), raw_posting("a2", title="Data Engineer")]})
+
+    _ingest([ACME], {"acme": [raw_posting("a1")]})
+
+    assert [(p.external_id, p.closed_at is not None) for p in _stored()] == [
+        ("a1", False),
+        ("a2", True),
+    ]
+
+
+def test_closing_leaves_the_status_alone(clean_db):
+    _ingest([ACME], {"acme": [raw_posting("a1")]})
+    with get_session() as session:
+        set_status(session, _stored()[0].id, "interviewing")
+
+    _ingest([ACME], {"acme": []})
+
+    (posting,) = _stored()
+    assert posting.closed_at is not None and posting.status == "interviewing"
+
+
+def test_posting_back_on_its_board_is_reopened(clean_db):
+    _ingest([ACME], {"acme": [raw_posting("a1")]})
+    _ingest([ACME], {"acme": []})
+
+    _ingest([ACME], {"acme": [raw_posting("a1")]})
+
+    (posting,) = _stored()
+    assert posting.closed_at is None
+
+
+def test_a_board_that_fails_to_load_closes_nothing(clean_db):
+    _ingest([ACME], {"acme": [raw_posting("a1")]})
+
+    stats = _ingest([ACME], {})  # acme's board now raises
+
+    assert stats.errors
+    (posting,) = _stored()
+    assert posting.closed_at is None
+
+
+def test_only_the_fetched_companys_postings_are_closed(clean_db):
+    _ingest(
+        [ACME, GLOBEX],
+        {
+            "acme": [raw_posting("a1")],
+            "globex": [raw_posting("g1", company="Globex", source="lever")],
+        },
+    )
+
+    _ingest([ACME], {"acme": []})
+
+    assert [(p.external_id, p.closed_at is not None) for p in _stored()] == [
+        ("a1", True),
+        ("g1", False),
     ]

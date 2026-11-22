@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from enum import StrEnum
 
 from sqlalchemy import JSON, DateTime, ForeignKey, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
@@ -10,6 +11,21 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 class Base(DeclarativeBase):
     pass
+
+
+class JobStatus(StrEnum):
+    """Where the user is with a job. Set by hand, any value at any time; the
+    pipeline never changes it (a posting leaving the board sets closed_at,
+    not the status)."""
+
+    NEW = "new"
+    SHORTLISTED = "shortlisted"
+    APPLIED = "applied"
+    INTERVIEWING = "interviewing"
+    OFFER = "offer"
+    REJECTED = "rejected"  # they said no
+    NOT_INTERESTED = "not_interested"  # the user said no
+    CLOSED = "closed"  # the role went away before the user got anywhere
 
 
 class Company(Base):
@@ -75,6 +91,15 @@ class Posting(Base):
     raw_payload: Mapped[dict] = mapped_column(JSON)
     posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Updated by every ingest run that finds the posting on its board.
+    last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Set by the first ingest run that no longer finds it on its board;
+    # cleared again if it comes back.
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # Plain string, not a database enum, so adding a status needs no migration.
+    status: Mapped[str] = mapped_column(default=JobStatus.NEW, server_default=JobStatus.NEW)
+    status_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     ingest_run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("ingest_runs.id"))
 

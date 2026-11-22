@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-from sqlalchemy import select
+from collections.abc import Collection
+from datetime import UTC, datetime
+
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from jobfit.db.models import Company, Posting, Source
+from jobfit.db.models import Company, JobStatus, Posting, Source
 
 
 def get_or_create_company(session: Session, name: str, canton_hint: str | None = None) -> Company:
@@ -41,3 +44,27 @@ def iter_canonical_postings(session: Session) -> list[Posting]:
     """
     query = select(Posting).where(Posting.is_duplicate_of.is_(None)).order_by(Posting.first_seen)
     return list(session.scalars(query))
+
+
+def mark_closed_postings(
+    session: Session, company_id, source_id, seen_external_ids: Collection[str], now: datetime
+) -> None:
+    """Sets closed_at on a company's postings that are no longer on its board
+    (and weren't already closed)."""
+    session.execute(
+        update(Posting)
+        .where(
+            Posting.company_id == company_id,
+            Posting.source_id == source_id,
+            Posting.external_id.not_in(seen_external_ids),
+            Posting.closed_at.is_(None),
+        )
+        .values(closed_at=now)
+    )
+
+
+def set_status(session: Session, posting_id, status: str) -> None:
+    """Sets a posting's status. Any status can follow any other."""
+    posting = session.get_one(Posting, posting_id)
+    posting.status = JobStatus(status)  # raises ValueError on an unknown status
+    posting.status_changed_at = datetime.now(UTC)

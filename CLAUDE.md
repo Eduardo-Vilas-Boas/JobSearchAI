@@ -30,8 +30,10 @@ Run the ingestion pipeline end to end (fetches from live ATS APIs):
 uv run python -m jobfit.ingest.cli
 ```
 
-Review guard decisions on stored postings (table of per-check scores, the verdict and which
-checks flagged it, with a drill-in to the stored text): `docker compose up -d` serves it at
+Postings page (`src/jobfit/ui/guard_review.py`): one table of stored postings, duplicates
+hidden, with the job status (edited in the table), posted / last seen / closed dates, per-check
+guard scores, the verdict and which checks flagged it, filters for status, verdict and posting
+date, and a drill-in to the stored text. `docker compose up -d` serves it at
 http://localhost:8501 (`Dockerfile.ui`). `src/` and `config/` are mounted into the container
 and Streamlit re-runs on save, so code changes show without a rebuild; rebuild with
 `docker compose up -d --build ui` only after changing the `ui` dependency group or
@@ -169,7 +171,17 @@ Known, measured gaps (details in `docs/0001`):
 - Recruiter "if you are an AI…" lines are likely missed; both candidate models target
   explicit instruction overrides.
 
-**Idempotency**: re-running the pipeline against the same postings stores nothing new.
+**Job lifecycle** (`Posting.status`, `last_seen`, `closed_at`, `status_changed_at`): `status`
+is one of `JobStatus` (new, shortlisted, applied, interviewing, offer, rejected,
+not_interested, closed), set only by the user, any value at any time, via
+`store.set_status` (which also stamps `status_changed_at`). It's a plain string column, not a
+DB enum, so adding a status needs no migration. The pipeline only touches the dates: each run
+sets `last_seen` on postings still on their board (and clears `closed_at` if one came back),
+and `store.mark_closed_postings` sets `closed_at` on a company's postings missing from its
+board. It never changes `status`, and a board that fails to fetch closes nothing.
+
+**Idempotency**: re-running the pipeline against the same postings stores nothing new
+(it only refreshes `last_seen`).
 `find_existing_posting` checks `(source_id, external_id)` before any processing runs for that
 posting. `store.iter_canonical_postings` is explicitly ordered by `first_seen` — without that,
 Postgres gives no row-order guarantee, and which existing posting "wins" as canonical when a

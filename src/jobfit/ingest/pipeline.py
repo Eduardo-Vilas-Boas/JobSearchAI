@@ -12,6 +12,7 @@ from jobfit.db.store import (
     get_or_create_company,
     get_or_create_source,
     iter_canonical_postings,
+    mark_closed_postings,
 )
 from jobfit.ingest.anonymize import Anonymizer, get_anonymizer
 from jobfit.ingest.dedup import content_hash, is_near_duplicate, minhash_signature
@@ -41,6 +42,8 @@ def run_ingest(
 
     Idempotent: re-running with the same postings stores nothing new, since
     each posting is keyed on (source, external_id) before any processing.
+    Re-running does update lifecycle dates: last_seen for postings still on
+    their board, closed_at for postings that have left it.
 
     `fetchers` maps an ATS type to the fetcher to use for it; by default
     each company's fetcher comes from the registry (live HTTP).
@@ -100,9 +103,16 @@ def _ingest_company(
     company = get_or_create_company(session, company_config.name, company_config.canton_hint)
     source = get_or_create_source(session, company_config.ats)
 
+    # Every posting this run finds on the board gets the same timestamp.
+    now = ingest_run.started_at
     for raw in raw_postings:
-        if find_existing_posting(session, source.id, raw.external_id) is not None:
-            continue  # already stored by an earlier run — idempotent no-op
+        existing = find_existing_posting(session, source.id, raw.external_id)
+        if existing is not None:
+            # Already stored by an earlier run: only its lifecycle dates
+            # change, never its text or guard verdict.
+            existing.last_seen = now
+            existing.closed_at = None  # back on the board, if it had left
+            continue
 
         # PII redacted first, so the guard (and later the LLM) never sees it.
         redacted = anonymizer.anonymize(posting_text(raw.title, raw.description_html))
@@ -137,6 +147,7 @@ def _ingest_company(
             is_duplicate_of=duplicate_of.id if duplicate_of else None,
             raw_payload=raw.raw_payload,
             posted_at=raw.posted_at,
+            last_seen=now,
             ingest_run_id=ingest_run.id,
         )
         session.add(posting)
@@ -156,6 +167,12 @@ def _ingest_company(
 
         if duplicate_of is None:
             canonical_postings.append(posting)
+
+    # Only reached when the fetch succeeded, so a board that fails to load
+    # never closes its postings.
+    mark_closed_postings(
+        session, company.id, source.id, {raw.external_id for raw in raw_postings}, now
+    )
 
 
 def _find_duplicate(

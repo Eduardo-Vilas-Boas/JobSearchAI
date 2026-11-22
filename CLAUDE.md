@@ -32,8 +32,10 @@ uv run python -m jobfit.ingest.cli
 
 Review guard decisions on stored postings (table of per-check scores, the verdict and which
 checks flagged it, with a drill-in to the stored text): `docker compose up -d` serves it at
-http://localhost:8501 (`Dockerfile.ui`; rebuild after UI changes with
-`docker compose up -d --build ui`). It installs only the `ui` dependency group in
+http://localhost:8501 (`Dockerfile.ui`). `src/` and `config/` are mounted into the container
+and Streamlit re-runs on save, so code changes show without a rebuild; rebuild with
+`docker compose up -d --build ui` only after changing the `ui` dependency group or
+`Dockerfile.ui`. It installs only the `ui` dependency group in
 `pyproject.toml`, not torch or the models; keep that group in step with the page's imports.
 Without Docker: `uv run streamlit run src/jobfit/ui/guard_review.py`.
 

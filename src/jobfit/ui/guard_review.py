@@ -48,6 +48,9 @@ def load_postings() -> pd.DataFrame:
             "title": posting.title,
             "company": company_name,
             "location": posting.location_raw,
+            # From the ATS: Greenhouse's first_published, Lever's createdAt
+            # (when the job was created in Lever, possibly before it went public).
+            "posted": posting.posted_at,
             "url": posting.url,
             "verdict": "quarantined" if posting.is_quarantined else "allowed",
             # The verdict was decided at ingest and isn't recomputed, so it
@@ -86,13 +89,31 @@ if verdict_filter == "Quarantined only":
 elif verdict_filter == "Allowed only":
     df = df[df["verdict"] == "allowed"]
 
+POSTED_WITHIN_DAYS = {"Any time": None, "Last 7 days": 7, "Last 30 days": 30, "Last 90 days": 90}
+posted_filter = st.radio("Posted", list(POSTED_WITHIN_DAYS), horizontal=True)
+days = POSTED_WITHIN_DAYS[posted_filter]
+if days is not None:
+    # Postings without a posting date are left out of any time window.
+    posted = pd.to_datetime(df["posted"], utc=True)
+    df = df[posted >= pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=days)]
+
 st.caption(f"{len(df)} postings")
 
-table_columns = ["title", "company", "location", "verdict", "flagged_by", *SCANNER_NAMES, "url"]
+table_columns = [
+    "title",
+    "company",
+    "location",
+    "posted",
+    "verdict",
+    "flagged_by",
+    *SCANNER_NAMES,
+    "url",
+]
 st.dataframe(
     df[table_columns],
     column_config={
         "url": st.column_config.LinkColumn("Original posting", display_text="Open"),
+        "posted": st.column_config.DatetimeColumn("Posted", format="YYYY-MM-DD"),
         "verdict": st.column_config.TextColumn("Verdict"),
         "flagged_by": st.column_config.TextColumn("Flagged by"),
         **{name: st.column_config.NumberColumn(name, format="%.2f") for name in SCANNER_NAMES},
@@ -107,7 +128,11 @@ selected_title = st.selectbox("Posting", df["title"] + " — " + df["company"])
 if selected_title:
     row = df[df["title"] + " — " + df["company"] == selected_title].iloc[0]
     flagged_by = f" (flagged by {row['flagged_by']})" if row["flagged_by"] else ""
-    st.markdown(f"**Verdict:** {row['verdict']}{flagged_by} · [original posting]({row['url']})")
+    posted = f"{row['posted']:%Y-%m-%d}" if pd.notna(row["posted"]) else "unknown"
+    st.markdown(
+        f"**Verdict:** {row['verdict']}{flagged_by} · **Posted:** {posted} · "
+        f"[original posting]({row['url']})"
+    )
     scanner_summary = ", ".join(
         f"{name}: {row[name]:.2f}" if pd.notna(row[name]) else f"{name}: n/a"
         for name in SCANNER_NAMES

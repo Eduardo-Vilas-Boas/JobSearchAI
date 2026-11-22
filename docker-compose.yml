@@ -23,6 +23,16 @@ services:
     environment:
       # Same database as the CLI, reached by service name inside compose.
       JOBFIT_DATABASE_URL: postgresql+psycopg://jobfit:jobfit@postgres:5432/jobfit
+      # Re-run the page when a source file changes. Polling, because file
+      # events from the host don't reliably reach a container on macOS.
+      STREAMLIT_SERVER_RUN_ON_SAVE: "true"
+      STREAMLIT_SERVER_FILE_WATCHER_TYPE: poll
+    volumes:
+      # Live code: the image's copies are replaced by the working tree, so
+      # code edits need no rebuild. Dependency changes (the `ui` group in
+      # pyproject.toml) or Dockerfile.ui changes still do.
+      - ./src:/app/src:ro
+      - ./config:/app/config:ro
     ports:
       - "127.0.0.1:8501:8501"  # this machine only, not the local network
     depends_on:

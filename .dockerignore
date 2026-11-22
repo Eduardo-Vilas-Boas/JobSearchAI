@@ -1,0 +1,13 @@
+# Keep secrets, local data and caches out of the build context.
+.env
+.env.*
+.venv
+data
+tmp
+docs
+tests
+.git
+.claude
+**/__pycache__
+.ruff_cache
+.pytest_cache

@@ -92,6 +92,6 @@ class GuardResult(Base):
     posting_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("postings.id"))
     posting: Mapped[Posting] = relationship(back_populates="guard_results")
 
-    scanner: Mapped[str]  # e.g. "PromptInjection", "Anonymize"
+    scanner: Mapped[str]  # e.g. "InvisibleText", "PromptInjection"
     score: Mapped[float]
     flagged: Mapped[bool]

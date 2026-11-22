@@ -22,7 +22,7 @@ htmlcov/
 .claude/settings.local.json
 
 # Local data (raw ATS payloads go to data/raw via Settings.raw_storage_dir)
-data/
+data/*
 
 # Editors and OS
 .idea/
@@ -31,3 +31,6 @@ data/
 
 # Editor settings (personal)
 .vscode/
+
+# Local scratch files (never committed)
+tmp/

@@ -36,6 +36,13 @@ def normalize_unicode(text: str) -> str:
     return unicodedata.normalize("NFKC", text)
 
 
+def posting_text(title: str, description_html: str) -> str:
+    """The text the pipeline anonymizes and guards for one posting: its title
+    line, then its description with markup stripped and Unicode normalized.
+    The eval set builds its samples with this too, so the two can't drift."""
+    return f"{title}\n{normalize_unicode(html_to_text(description_html))}"
+
+
 def detect_language(text: str) -> str | None:
     """Returns 'en', 'fr' or 'de', or None if confidence is too low to call it."""
     language = _DETECTOR.detect_language_of(text)

@@ -32,4 +32,3 @@ companies:
     ats: lever
     board_token: sonarsource
     canton_hint: GE  # Geneva
-    aliases: [Sonar]  # posts refer to itself as "Sonar", e.g. "Who is Sonar?"

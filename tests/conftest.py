@@ -6,13 +6,15 @@ from sqlalchemy import create_engine, make_url, text
 import jobfit.config
 from jobfit.config import REPO_ROOT, Settings
 
-# Tests get their own database (`<dev db>_test`, in the same Postgres container)
-# so `clean_db`'s TRUNCATE can never wipe postings the real CLI ingested. This
-# must run before anything imports `jobfit.db.session`, which builds its engine
-# from `jobfit.config.settings` at import time — conftest is imported before
-# any test module, so rebinding the module-level `settings` here is enough.
-_DEV_URL = make_url(Settings().database_url)
-_TEST_URL = _DEV_URL.set(database=f"{_DEV_URL.database}_test")
+# Tests get their own database, `jobfit_test`, in the local Postgres container
+# from docker-compose.yml (same credentials), so `clean_db`'s TRUNCATE can
+# never wipe postings the real CLI ingested. Set here, not read from `.env`,
+# so the tests never depend on the database the CLI uses.
+#
+# This must run before anything imports `jobfit.db.session`, which builds its
+# engine from `jobfit.config.settings` at import time. Conftest is imported
+# before any test module, so rebinding the module-level `settings` is enough.
+_TEST_URL = make_url("postgresql+psycopg://jobfit:jobfit@localhost:5432/jobfit_test")
 os.environ["JOBFIT_DATABASE_URL"] = _TEST_URL.render_as_string(hide_password=False)
 jobfit.config.settings = Settings()
 
@@ -28,7 +30,9 @@ def test_database() -> None:
 
     from alembic import command
 
-    admin = create_engine(_DEV_URL.set(database="postgres"), isolation_level="AUTOCOMMIT")
+    # CREATE DATABASE needs a connection to a database that already exists;
+    # `postgres` is the maintenance database every Postgres server has.
+    admin = create_engine(_TEST_URL.set(database="postgres"), isolation_level="AUTOCOMMIT")
     with admin.connect() as conn:
         exists = conn.execute(
             text("SELECT 1 FROM pg_database WHERE datname = :name"),
@@ -50,19 +54,26 @@ def test_database() -> None:
 def clean_db(test_database):  # pylint: disable=redefined-outer-name,unused-argument
     """Truncates all jobfit tables so DB-backed tests start from empty state.
 
-    Requires a running local Postgres (see docker-compose.yml). Refuses to run
-    against any database whose name doesn't end in `_test` — a last line of
-    defence against the redirect above ever silently failing.
+    Requires a running local Postgres (see docker-compose.yml). First checks
+    that the code under test is connected to the test database, in case the
+    redirect above ever silently fails; then truncates over its own
+    connection, which can only reach the test database.
     """
     from jobfit.db.session import get_session
 
     with get_session() as session:
         current = session.execute(text("SELECT current_database()")).scalar()
-        if not current.endswith("_test"):
-            raise RuntimeError(f"clean_db refusing to TRUNCATE non-test database {current!r}")
-        session.execute(
-            text(
-                "TRUNCATE guard_results, postings, ingest_runs, companies, sources "
-                "RESTART IDENTITY CASCADE"
+    if current != _TEST_URL.database:
+        raise RuntimeError(f"app is connected to {current!r}, not the test database")
+
+    engine = create_engine(_TEST_URL)
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "TRUNCATE guard_results, postings, ingest_runs, companies, sources "
+                    "RESTART IDENTITY CASCADE"
+                )
             )
-        )
+    finally:
+        engine.dispose()

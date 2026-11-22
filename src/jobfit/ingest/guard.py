@@ -1,89 +1,104 @@
+"""Prompt-injection guard: the pipeline step between PII redaction and storage.
+
+Two checks, each with its default decision rule and no tuning:
+- InvisibleText: strips hidden Unicode characters (zero-width spaces, tag
+  characters, private-use characters) and flags the posting if it found any.
+  Ported from LLM Guard's scanner of the same name (MIT), which is no longer
+  maintained.
+- PromptInjection: one Hugging Face classifier, run directly with
+  transformers. For now protectai/deberta-v3-base-prompt-injection-v2
+  (Apache 2.0, mainly English); planned: Meta's Llama Prompt Guard 2 86M,
+  trained on several languages, once access to that gated model is approved.
+
+A posting is quarantined if any check flags it: it's stored, not discarded,
+so a human can review and release it. Every check runs even after one flags,
+so guard_results always has every check's score for the review page.
+"""
+
 from __future__ import annotations
 
+import unicodedata
 from dataclasses import dataclass
 from functools import lru_cache
+from typing import Protocol
 
-from llm_guard import scan_prompt
-from llm_guard.input_scanners import Anonymize, InvisibleText, Language, PromptInjection, Regex
-from llm_guard.input_scanners.base import Scanner as InputScanner
-from llm_guard.input_scanners.prompt_injection import MatchType
-from llm_guard.vault import Vault
-
-from jobfit.config import load_companies
-
-# Phrase structure adapted from Rebuff's generateInjectionKeywords()
-# (https://github.com/protectai/rebuff, MIT License, ProtectAI): verb +
-# optional "prior/previous/..." qualifier + object noun, e.g. "ignore
-# previous instructions", "disregard prior context". A credited public
-# pattern, not one written for this project — English only.
-# `(?i)` is load-bearing: llm_guard's Regex scanner compiles patterns with
-# no flags of its own, so without it this never matches "IGNORE ALL
-# PREVIOUS INSTRUCTIONS" or any other non-lowercase attack — confirmed by
-# running it against the adversarial set and seeing zero matches, including
-# on the one example it's obviously supposed to catch.
-_REBUFF_OVERRIDE_PATTERN = (
-    r"(?i)\b(?:ignore|disregard|skip|forget|neglect|overlook|omit|bypass"
-    r"|pay no attention to|do not follow|do not obey)\b"
-    r"(?:\s+\w+){0,2}?\s*"
-    r"\b(?:prior|previous|preceding|above|foregoing|earlier|initial)?\b\s*"
-    r"\b(?:content|text|instructions?|directives?|commands?|context"
-    r"|conversation|inputs?|data|messages?|communication|responses?|requests?)\b"
-)
-
-# Measured, not guessed: Anonymize's NER model misreads Swiss place names as
-# PERSON entities (e.g. "Geneva" in "Data Analyst - Geneva." scored 1.0
-# confidence) — a real false positive found while testing against this
-# project's own postings, not a hypothetical. `allowed_names` maps straight
-# to Presidio's `allow_list`, an exemption the scanner itself exposes, so
-# this is config, not a custom recognizer. Extend as new cities show up in
-# `config/companies.yaml`.
-_SWISS_PLACE_NAMES = [
-    "Zurich",
-    "Zürich",
-    "Geneva",
-    "Genève",
-    "Basel",
-    "Bern",
-    "Berne",
-    "Lausanne",
-    "Lucerne",
-    "Luzern",
-    "Lugano",
-    "Zug",
-    "St. Gallen",
-    "Winterthur",
-    "Fribourg",
-    "Freiburg",
-    "Neuchâtel",
-    "Biel",
-    "Bienne",
-    "Thun",
-    "Baden",
-    "Schaffhausen",
-    "Chur",
-    "Sion",
-    "Davos",
-    "Montreux",
-    "Nyon",
-    "Rapperswil",
-    "Vaud",
-    "Ticino",
-    "Valais",
-    "Aargau",
-]
+import torch
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 
-def _allowed_names() -> list[str]:
-    """Same bug, same fix, a second time: Anonymize also misread the company
-    names themselves as PERSON entities ("Who is Sonar?" -> "Who is
-    [REDACTED_PERSON_1]?", found on real live postings). Company names come
-    from config/companies.yaml so this stays correct as that list grows,
-    instead of being a second hardcoded list to maintain by hand."""
-    names = list(_SWISS_PLACE_NAMES)
-    for company in load_companies():
-        names.append(company.name)
-        names.extend(company.aliases)
-    return names
+class Scanner(Protocol):
+    """One check. Returns the text for the next check (cleaned or unchanged),
+    whether the text passed, and a score for the review page."""
+
+    def scan(self, prompt: str) -> tuple[str, bool, float]: ...
+
+
+class InvisibleText:
+    """Unicode format (Cf), private-use (Co) and unassigned (Cn) characters:
+    the categories LLM Guard's InvisibleText strips. Score 1.0 if any were
+    found, 0.0 otherwise."""
+
+    _HIDDEN_CATEGORIES = frozenset({"Cf", "Co", "Cn"})
+
+    def scan(self, prompt: str) -> tuple[str, bool, float]:
+        cleaned = "".join(
+            char for char in prompt if unicodedata.category(char) not in self._HIDDEN_CATEGORIES
+        )
+        found = cleaned != prompt
+        return cleaned, not found, 1.0 if found else 0.0
+
+
+# The classifier behind PromptInjection, pinned to one commit of its Hugging
+# Face repo so an upstream update can't change the guard's behaviour unnoticed.
+# To switch to Prompt Guard 2, set "meta-llama/Llama-Prompt-Guard-2-86M" and
+# its current commit (gated: accept Meta's license on its Hugging Face page
+# and run `hf auth login` first), and check its attack label.
+PROMPT_INJECTION_MODEL = "protectai/deberta-v3-base-prompt-injection-v2"
+PROMPT_INJECTION_REVISION = "90c9989b1a342275dd0d1a95aad283c04e075671"
+
+
+class PromptInjection:
+    """A Hugging Face text classifier, run on the whole text in overlapping
+    512-token chunks: the model reads at most 512 tokens, and real postings
+    are often longer. The score is the highest attack probability over the
+    chunks; the text is flagged when that's above 0.5, i.e. when the model's
+    own top label is the attack label (its default decision, no threshold)."""
+
+    _MAX_TOKENS = 512
+    _OVERLAP_TOKENS = 64  # so an attack split across a chunk border is still seen whole
+
+    def __init__(
+        self, model: str = PROMPT_INJECTION_MODEL, revision: str = PROMPT_INJECTION_REVISION
+    ) -> None:
+        self._tokenizer = AutoTokenizer.from_pretrained(model, revision=revision)
+        self._model = AutoModelForSequenceClassification.from_pretrained(
+            model, revision=revision
+        ).eval()
+        # Class 1 is ProtectAI's INJECTION (class 0 is SAFE). Not yet checked
+        # for Prompt Guard 2, whose config couldn't be downloaded.
+        self._attack_label = 1
+
+    def scan(self, prompt: str) -> tuple[str, bool, float]:
+        chunks = self._tokenizer(
+            prompt,
+            truncation=True,
+            max_length=self._MAX_TOKENS,
+            stride=self._OVERLAP_TOKENS,
+            return_overflowing_tokens=True,
+            padding=True,
+            return_tensors="pt",
+        )
+        chunks.pop("overflow_to_sample_mapping", None)
+        with torch.no_grad():
+            logits = self._model(**chunks).logits
+        attack_probability = logits.softmax(dim=-1)[:, self._attack_label].max().item()
+        return prompt, attack_probability <= 0.5, attack_probability
+
+
+def default_scanners() -> list[Scanner]:
+    """The production checks, in order: hidden characters are stripped
+    before the classifier reads the text."""
+    return [InvisibleText(), PromptInjection()]
 
 
 @dataclass(frozen=True)
@@ -101,60 +116,33 @@ class GuardScanResult:
 
 
 class InjectionGuard:
-    """Runs postings through LLM Guard's off-the-shelf input scanners.
+    """Runs a posting through every check in order, each one's output text
+    feeding the next, so `sanitized_text` is the result of the whole chain.
 
-    No custom detection logic: PromptInjection, InvisibleText and Language
-    run with their library defaults (Language restricted to English),
-    Anonymize's PII detection is its own default NER model, and Regex is
-    seeded with a credited public pattern rather than one written for this
-    project. A posting is quarantined if any scanner flags it — stored, not
-    discarded, so a human can review and release it.
-
-    Scanners run in sequence and each one's sanitized output feeds the next
-    (Anonymize's PII redaction happens before InvisibleText's character
-    stripping, before the language and injection checks), so
-    `sanitized_text` is the fully-cleaned result of the whole chain, not
-    just the last scanner.
+    Detection only: PII redaction is a separate step that runs before this
+    (`jobfit.ingest.anonymize`), so the guard only ever sees redacted text.
     """
 
-    def __init__(self, scanners: list[InputScanner] | None = None) -> None:
-        """`scanners` overrides the default chain — for unit tests that check
-        the aggregation logic with fake scanners, without loading any models."""
-        self._vault = Vault()
-        self._scanners = scanners if scanners is not None else self._default_scanners()
-
-    def _default_scanners(self) -> list[InputScanner]:
-        return [
-            Anonymize(self._vault, allowed_names=_allowed_names()),
-            InvisibleText(),
-            # Applications are English only, so any other language is
-            # quarantined. FULL (the library default) classifies the whole
-            # posting (first 512 tokens), not each sentence: SENTENCE mode
-            # would quarantine English postings for a single German line
-            # like "Arbeitsort: Zürich", common in Swiss postings.
-            Language(valid_languages=["en"]),
-            PromptInjection(match_type=MatchType.SENTENCE),
-            Regex(patterns=[_REBUFF_OVERRIDE_PATTERN]),
-        ]
+    def __init__(self, scanners: list[Scanner] | None = None) -> None:
+        """`scanners` overrides the default checks, for unit tests that check
+        the guard's own logic with fake scanners, without loading any models."""
+        self._scanners = scanners if scanners is not None else default_scanners()
 
     def scan(self, text: str) -> GuardScanResult:
-        sanitized, results_valid, results_score = scan_prompt(self._scanners, text)
-        results = [
-            ScannerResult(scanner=name, score=results_score[name], flagged=not is_valid)
-            for name, is_valid in results_valid.items()
-        ]
-        # Vault has no reset method; get() returns the live list, so clearing
-        # it in place discards whatever Anonymize just stashed. We want
-        # one-way redaction, not a way to recover the PII we stripped.
-        self._vault.get().clear()
+        results = []
+        for scanner in self._scanners:
+            text, is_valid, score = scanner.scan(text)
+            results.append(
+                ScannerResult(scanner=type(scanner).__name__, score=score, flagged=not is_valid)
+            )
         return GuardScanResult(
             quarantined=any(r.flagged for r in results),
-            sanitized_text=sanitized,
+            sanitized_text=text,
             results=results,
         )
 
 
 @lru_cache(maxsize=1)
 def get_guard() -> InjectionGuard:
-    """Loads the scanners' models once per process — that's the expensive part."""
+    """Loads the models once per process; that's the expensive part."""
     return InjectionGuard()

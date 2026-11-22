@@ -15,10 +15,6 @@ class CompanyConfig(BaseModel):
     ats: str
     board_token: str
     canton_hint: str | None = None
-    # Short/informal names a company uses to refer to itself in posting prose
-    # (e.g. "SonarSource" posts as "Sonar") — Anonymize's NER model can
-    # misread these as a PERSON if they're not also exempted.
-    aliases: list[str] = []
 
 
 def load_companies(path: Path = DEFAULT_COMPANIES_PATH) -> list[CompanyConfig]:

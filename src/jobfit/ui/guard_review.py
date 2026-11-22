@@ -17,7 +17,10 @@ from sqlalchemy import select
 from jobfit.db.models import Company, GuardResult, Posting
 from jobfit.db.session import get_session
 
-SCANNER_NAMES = ["Anonymize", "InvisibleText", "PromptInjection", "Regex"]
+# The current guard's scanners, as in guard.default_scanners(); keep in step
+# with it. PII redaction is a separate step, not shown here. Postings stored
+# before a scanner existed have no score for it (shown blank).
+SCANNER_NAMES = ["InvisibleText", "PromptInjection"]
 
 
 @st.cache_data(ttl=30)
@@ -27,12 +30,17 @@ def load_postings() -> pd.DataFrame:
             select(Posting, Company.name).join(Company).order_by(Posting.first_seen)
         ).all()
         guard_rows = session.execute(
-            select(GuardResult.posting_id, GuardResult.scanner, GuardResult.score)
+            select(
+                GuardResult.posting_id, GuardResult.scanner, GuardResult.score, GuardResult.flagged
+            ).order_by(GuardResult.scanner)
         ).all()
 
     scores_by_posting: dict = {}
-    for posting_id, scanner, score in guard_rows:
+    flagged_by_posting: dict = {}
+    for posting_id, scanner, score, flagged in guard_rows:
         scores_by_posting.setdefault(posting_id, {})[scanner] = score
+        if flagged:
+            flagged_by_posting.setdefault(posting_id, []).append(scanner)
 
     records = []
     for posting, company_name in rows:
@@ -41,7 +49,11 @@ def load_postings() -> pd.DataFrame:
             "company": company_name,
             "location": posting.location_raw,
             "url": posting.url,
-            "verdict": "flagged" if posting.is_quarantined else "allowed",
+            "verdict": "quarantined" if posting.is_quarantined else "allowed",
+            # The verdict was decided at ingest and isn't recomputed, so it
+            # can come from a scanner since removed (e.g. Anonymize or
+            # Language); this column shows which ones decided it.
+            "flagged_by": ", ".join(flagged_by_posting.get(posting.id, [])),
             "content": posting.normalized_text,
         }
         scanner_scores = scores_by_posting.get(posting.id, {})
@@ -55,8 +67,11 @@ def load_postings() -> pd.DataFrame:
 st.set_page_config(page_title="Guard review", layout="wide")
 st.title("Injection guard review")
 st.caption(
-    "Every stored posting, the content fed to LLM Guard's scanners, their "
-    "per-scanner scores (-1 = clean, 0-1 = risk), and the final verdict."
+    "Every stored posting, its text after PII redaction and the guard, the "
+    "current checks' scores (PromptInjection: attack probability, flagged above "
+    "0.5; InvisibleText: 1 = hidden characters found), and the verdict stored at "
+    "ingest, with the scanners that flagged it. Postings are scanned once, when "
+    "first ingested, so verdicts from removed scanners stay until re-scanned."
 )
 
 df = load_postings()
@@ -65,24 +80,25 @@ if df.empty:
     st.warning("No postings stored yet — run `uv run python -m jobfit.ingest.cli` first.")
     st.stop()
 
-verdict_filter = st.radio("Show", ["All", "Flagged only", "Allowed only"], horizontal=True)
-if verdict_filter == "Flagged only":
-    df = df[df["verdict"] == "flagged"]
+verdict_filter = st.radio("Show", ["All", "Quarantined only", "Allowed only"], horizontal=True)
+if verdict_filter == "Quarantined only":
+    df = df[df["verdict"] == "quarantined"]
 elif verdict_filter == "Allowed only":
     df = df[df["verdict"] == "allowed"]
 
 st.caption(f"{len(df)} postings")
 
-table_columns = ["title", "company", "location", "verdict", *SCANNER_NAMES, "url"]
+table_columns = ["title", "company", "location", "verdict", "flagged_by", *SCANNER_NAMES, "url"]
 st.dataframe(
     df[table_columns],
     column_config={
         "url": st.column_config.LinkColumn("Original posting", display_text="Open"),
         "verdict": st.column_config.TextColumn("Verdict"),
+        "flagged_by": st.column_config.TextColumn("Flagged by"),
         **{name: st.column_config.NumberColumn(name, format="%.2f") for name in SCANNER_NAMES},
     },
     hide_index=True,
-    use_container_width=True,
+    width="stretch",
 )
 
 st.divider()
@@ -90,7 +106,11 @@ st.subheader("Inspect one posting")
 selected_title = st.selectbox("Posting", df["title"] + " — " + df["company"])
 if selected_title:
     row = df[df["title"] + " — " + df["company"] == selected_title].iloc[0]
-    st.markdown(f"**Verdict:** {row['verdict']} · [original posting]({row['url']})")
-    scanner_summary = ", ".join(f"{name}: {row[name]:.2f}" for name in SCANNER_NAMES)
+    flagged_by = f" (flagged by {row['flagged_by']})" if row["flagged_by"] else ""
+    st.markdown(f"**Verdict:** {row['verdict']}{flagged_by} · [original posting]({row['url']})")
+    scanner_summary = ", ".join(
+        f"{name}: {row[name]:.2f}" if pd.notna(row[name]) else f"{name}: n/a"
+        for name in SCANNER_NAMES
+    )
     st.caption(scanner_summary)
-    st.text_area("Content fed to the guard (post-redaction)", row["content"], height=300)
+    st.text_area("Stored text (after PII redaction and the guard)", row["content"], height=300)

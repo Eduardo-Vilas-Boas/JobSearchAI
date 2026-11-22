@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
@@ -12,10 +13,12 @@ from jobfit.db.store import (
     get_or_create_source,
     iter_canonical_postings,
 )
+from jobfit.ingest.anonymize import Anonymizer, get_anonymizer
 from jobfit.ingest.dedup import content_hash, is_near_duplicate, minhash_signature
+from jobfit.ingest.fetchers.base import Fetcher
 from jobfit.ingest.fetchers.registry import get_fetcher
 from jobfit.ingest.guard import InjectionGuard, get_guard
-from jobfit.ingest.normalize import detect_language, html_to_text, normalize_unicode
+from jobfit.ingest.normalize import detect_language, posting_text
 
 
 @dataclass
@@ -28,13 +31,22 @@ class RunStats:
     errors: list[str] = field(default_factory=list)
 
 
-def run_ingest(companies: list[CompanyConfig], guard: InjectionGuard | None = None) -> RunStats:
+def run_ingest(
+    companies: list[CompanyConfig],
+    guard: InjectionGuard | None = None,
+    anonymizer: Anonymizer | None = None,
+    fetchers: Mapping[str, Fetcher] | None = None,
+) -> RunStats:
     """Fetches, cleans and stores postings for every configured company.
 
     Idempotent: re-running with the same postings stores nothing new, since
     each posting is keyed on (source, external_id) before any processing.
+
+    `fetchers` maps an ATS type to the fetcher to use for it; by default
+    each company's fetcher comes from the registry (live HTTP).
     """
     guard = guard or get_guard()
+    anonymizer = anonymizer or get_anonymizer()
     stats = RunStats()
 
     with get_session() as session:
@@ -47,7 +59,14 @@ def run_ingest(companies: list[CompanyConfig], guard: InjectionGuard | None = No
         for company_config in companies:
             try:
                 _ingest_company(
-                    session, company_config, ingest_run, canonical_postings, guard, stats
+                    session,
+                    company_config,
+                    ingest_run,
+                    canonical_postings,
+                    guard,
+                    anonymizer,
+                    fetchers,
+                    stats,
                 )
             except Exception as exc:  # noqa: BLE001 - one bad company shouldn't kill the run
                 stats.errors.append(f"{company_config.name}: {exc}")
@@ -67,9 +86,14 @@ def _ingest_company(
     ingest_run: IngestRun,
     canonical_postings: list[Posting],
     guard: InjectionGuard,
+    anonymizer: Anonymizer,
+    fetchers: Mapping[str, Fetcher] | None,
     stats: RunStats,
 ) -> None:
-    fetcher = get_fetcher(company_config.ats)
+    if fetchers is None:
+        fetcher = get_fetcher(company_config.ats)
+    else:
+        fetcher = fetchers[company_config.ats]
     raw_postings = fetcher.fetch(company_config.board_token, company_config.name)
     stats.fetched += len(raw_postings)
 
@@ -80,9 +104,10 @@ def _ingest_company(
         if find_existing_posting(session, source.id, raw.external_id) is not None:
             continue  # already stored by an earlier run — idempotent no-op
 
-        normalized_body = normalize_unicode(html_to_text(raw.description_html))
-        guard_result = guard.scan(f"{raw.title}\n{normalized_body}")
-        text = guard_result.sanitized_text  # PII redacted, injection phrases stripped
+        # PII redacted first, so the guard (and later the LLM) never sees it.
+        redacted = anonymizer.anonymize(posting_text(raw.title, raw.description_html))
+        guard_result = guard.scan(redacted)
+        text = guard_result.sanitized_text  # PII redacted, hidden characters stripped
 
         signature = minhash_signature(text)
         hash_key = content_hash(raw.title, raw.company, raw.location)

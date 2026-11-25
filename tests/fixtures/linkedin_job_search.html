@@ -1,0 +1,129 @@
+<!--
+  Hand-written stand-in for a logged-in LinkedIn job page (the two-pane
+  search view, /jobs/search/?currentJobId=...), as the browser renders it.
+  It keeps the real page's structure, captured 2026-11-22: hashed class
+  names, the company and /jobs/view/ links in the top card, the location /
+  date / applicants line, and description boxes marked
+  data-testid="expandable-text-box". All text is made up. A real page is
+  ~1 MB and holds the viewer's own name and profile, so none is committed.
+-->
+<html lang="en" dir="ltr">
+<head>
+  <title>Perception Engineer | Example Robotics | LinkedIn</title>
+  <style>.cfsjq5 { color: black; }</style>
+  <script>window.__noise = {"currentJobId": "4000000001"};</script>
+</head>
+<body>
+  <header>
+    <h2 class="cfsa2y cfskdg">0 notifications</h2>
+  </header>
+  <main>
+    <div data-testid="lazy-column" class="cfsayy">
+      <!-- Job list (left pane): other postings, never the captured one. -->
+      <ul>
+        <li>
+          <a href="https://www.linkedin.com/jobs/search/?currentJobId=4000000002">
+            <p class="cfsjq5">Data Scientist</p>
+          </a>
+          <a href="https://www.linkedin.com/company/other-corp/">Other Corp</a>
+          <span class="cfsexg">Basel, Switzerland</span>
+        </li>
+      </ul>
+    </div>
+    <div data-testid="lazy-column" class="cfsayy">
+      <!-- Job detail (right pane): the posting being viewed. -->
+      <div class="cfskdm cfsayy cfsg2e cfsh9k">
+        <div class="cfsayy cfsg2u cfsh9m">
+          <div class="cfsayq cfskdg" data-display-contents="true">
+            <a aria-label="Company, Example Robotics." class="cfskpi cfskph"
+               href="https://www.linkedin.com/company/example-robotics/life/" tabindex="0">
+              <div class="cfsg3i cfsayy">
+                <figure class="cfskg8"></figure>
+                <p class="cfsjq5 cfsjw2">
+                  <a class="cfsewa cfsewj" href="https://www.linkedin.com/company/example-robotics/life/">
+                    Example
+                    Robotics
+                  </a>
+                </p>
+              </div>
+            </a>
+          </div>
+        </div>
+        <div class="cfsayq cfskdg" data-display-contents="true">
+          <p class="cfsjq5 cfsjwz">
+            <a class="cfsfvv cfskgu"
+               href="https://www.linkedin.com/jobs/view/4000000001/?trackingId=abc%3D%3D&amp;refId=def&amp;alternateChannel=search">
+              Perception
+              Engineer
+            </a>
+          </p>
+        </div>
+        <div class="cfsayy cfsg2u"></div>
+        <p class="cfsjq5 cfsjwr cfsjqj">
+          <span class="cfsexg cfskdg">
+            Zurich,
+            Switzerland
+          </span>
+          <span class="cfsjq2 cfskdg"></span>
+          ·
+          <span class="cfsjq2 cfskdg"></span>
+          <span class="cfsexg cfskdg">
+            Reposted 2
+            weeks ago
+          </span>
+          <span class="cfsjq2 cfskdg"></span>
+          ·
+          <span class="cfsjq2 cfskdg"></span>
+          <span class="cfsexg cfskdg">
+            Over
+            100 people clicked
+            apply
+          </span>
+        </p>
+        <div class="cfsjqj cfsewa">
+          <p class="cfsjq5"><span><span class="cfsexg">Responses managed off LinkedIn</span></span></p>
+        </div>
+      </div>
+
+      <div class="cfskdm cfsayy">
+        <h2 class="cfsjq5 cfsjwy">People you can reach out to</h2>
+        <a href="https://www.linkedin.com/in/someone/">A Person</a>
+      </div>
+
+      <div class="cfsayy cfsg2u cfsh9k">
+        <h2 class="cfsjq5 cfsjwy cfsjhg">About the job</h2>
+        <div>
+          <div>
+            <p>
+              <span class="cfska7 cfsjz2" data-testid="expandable-text-box" tabindex="-1">
+                <strong class="cfsjxz">About the team<br/><br/></strong>
+                We build the perception stack for autonomous inspection robots.<br/><br/>
+                <strong>Your role</strong><br/>
+                <ul>
+                  <li>Train and deploy object detection models in PyTorch.</li>
+                  <li>Fuse camera and lidar data on the robot.</li>
+                </ul>
+                <strong>Your profile</strong><br/>
+                MSc in computer science or robotics, three years of computer vision.
+              </span>
+              <button data-testid="expandable-text-button">… more</button>
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="cfsayy cfsg2u cfsh9k">
+        <h2 class="cfsjq5 cfsjwy cfsjhg">About the company</h2>
+        <div>
+          <p>
+            <span class="cfska7" data-testid="expandable-text-box" tabindex="-1">
+              Example Robotics makes legged robots for industrial sites.
+            </span>
+            <button data-testid="expandable-text-button">… more</button>
+          </p>
+        </div>
+      </div>
+    </div>
+  </main>
+</body>
+</html>

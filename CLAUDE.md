@@ -30,10 +30,21 @@ Run the ingestion pipeline end to end (fetches from live ATS APIs):
 uv run python -m jobfit.ingest.cli
 ```
 
-Postings page (`src/jobfit/ui/guard_review.py`): one table of stored postings, duplicates
-hidden, with the job status (edited in the table), posted / last seen / closed dates, per-check
-guard scores, the verdict and which checks flagged it, filters for status, verdict and posting
-date, and a drill-in to the stored text. `docker compose up -d` serves it at
+Capture server for the Chrome extension (`extension/`, loaded unpacked from
+chrome://extensions with Developer mode on), on http://127.0.0.1:8765:
+```
+uv run python -m jobfit.ingest.capture.server
+```
+
+Postings app (`src/jobfit/ui/`): `guard_review.py` is the entry point and only routes, via
+`st.navigation`, to two pages. `postings.py` (at `/`) is one table of stored postings,
+duplicates hidden, with the job status (edited in the table), posted / last seen / closed
+dates, per-check guard scores, the verdict and which checks flagged it, and filters for
+status, verdict and posting date. Clicking a title opens `job.py` (at `/job?id=<posting id>`)
+in a new tab: the posting's details, editable status, dates, guard verdict, other stored
+copies, and its stored text. Streamlit's table can't catch double-clicks or serve
+`/job/<id>` paths, so the title is a link column whose URL carries the title for display
+(`data.job_page_link`). Shared queries are in `data.py`. `docker compose up -d` serves it at
 http://localhost:8501 (`Dockerfile.ui`). `src/` and `config/` are mounted into the container
 and Streamlit re-runs on save, so code changes show without a rebuild; rebuild with
 `docker compose up -d --build ui` only after changing the `ui` dependency group or
@@ -122,6 +133,22 @@ in page order, since the role is mostly in the last two.
 Only add a company to `config/companies.yaml` after confirming its board endpoint actually
 returns 200 — every current entry was verified live before being committed, not guessed. A
 board can return 200 with no postings (Squirro and DFINITY did on 2026-11-22).
+
+**Captures** (`jobfit.ingest.capture`): for sites with no public board API, LinkedIn first.
+The extension sends the open tab's rendered HTML and URL to the capture server; all parsing
+is in Python (`capture/linkedin.py`), so a LinkedIn markup change is a Python fix and stored
+pages can be re-parsed. LinkedIn's class names are hashed and unstable, so the parser uses
+structure instead: `currentJobId` or `/jobs/view/<id>` for the id, the `/jobs/view/` link
+for the title, the `/company/` link before it, the "·" line after it (location, relative
+date anchored at capture time via `dateparser`), the first `expandable-text-box` after it for
+the description. `pipeline.ingest_capture` runs the same anonymize → guard → dedup → store
+steps as fetched postings and applies the blocklist, but never marks anything closed (no
+board to vanish from). The whole page is kept in `raw_payload` (it holds the logged-in user's
+own name and profile; local DB only). The server accepts only `chrome-extension://` origins,
+since any open website can reach localhost. `/previews` parses without storing; `/captures`
+stores. Real captured pages for the local-only test live in `data/html_samples/linkedin/`;
+the committed fixture `tests/fixtures/linkedin_job_search.html` is hand-written with the
+real structure and made-up text.
 
 **Blocked companies**: `blocked_companies` in `config/companies.yaml` lists consultancies
 and agencies whose postings are skipped before any processing and never stored (counted in

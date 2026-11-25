@@ -6,11 +6,11 @@ import unicodedata
 from bs4 import BeautifulSoup
 from lingua import Language, LanguageDetectorBuilder
 
-_DETECTOR = (
-    LanguageDetectorBuilder.from_languages(Language.ENGLISH, Language.FRENCH, Language.GERMAN)
-    .with_low_accuracy_mode()
-    .build()
-)
+# Full accuracy, not lingua's low-accuracy mode: that one called English tech
+# postings (dense with product names) German, 7 of 137 stored on 2026-11-22.
+_DETECTOR = LanguageDetectorBuilder.from_languages(
+    Language.ENGLISH, Language.FRENCH, Language.GERMAN
+).build()
 
 _LANGUAGE_CODES = {
     Language.ENGLISH: "en",

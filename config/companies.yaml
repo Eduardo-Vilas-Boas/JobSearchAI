@@ -33,6 +33,26 @@ companies:
     board_token: sonarsource
     canton_hint: GE  # Geneva
 
+  - name: ANYbotics
+    ats: lever
+    board_token: anybotics
+    canton_hint: ZH  # Zurich
+
+  - name: Gravis Robotics
+    ats: lever
+    board_token: gravisrobotics
+    canton_hint: ZH  # Zurich
+
+  - name: Auterion
+    ats: greenhouse
+    board_token: auterion
+    canton_hint: ZH  # Zurich
+
+  - name: Anthropic
+    ats: greenhouse
+    board_token: anthropic
+    canton_hint: ZH  # Zurich office; the board lists all offices worldwide
+
 # Companies whose postings are skipped, never stored: consultancies and
 # recruitment agencies that post on behalf of clients. Matched against the
 # company named on each posting, ignoring case and spacing, so list each

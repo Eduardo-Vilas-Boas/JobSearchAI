@@ -4,11 +4,12 @@ import uuid
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Literal
 
 from datasketch import MinHash
 
 from jobfit.config import CompanyConfig
-from jobfit.db.models import GuardResult, IngestRun, Posting
+from jobfit.db.models import Company, GuardResult, IngestRun, Posting, Source
 from jobfit.db.session import get_session
 from jobfit.db.store import (
     find_existing_posting,
@@ -89,13 +90,76 @@ def run_ingest(
             except Exception as exc:  # noqa: BLE001 - one bad company shouldn't kill the run
                 stats.errors.append(f"{company_config.name}: {exc}")
 
-        ingest_run.finished_at = datetime.now(UTC)
-        ingest_run.fetched_count = stats.fetched
-        ingest_run.stored_count = stats.stored
-        ingest_run.duplicate_count = stats.exact_duplicates + stats.near_duplicates
-        ingest_run.quarantined_count = stats.quarantined
+        _finish_run(ingest_run, stats)
 
     return stats
+
+
+CaptureStatus = Literal["stored", "already_stored", "blocked"]
+
+
+@dataclass(frozen=True)
+class CaptureResult:
+    status: CaptureStatus
+    raw: RawPosting
+    posting_id: uuid.UUID | None = None
+    quarantined: bool = False
+    duplicate_of: uuid.UUID | None = None
+
+
+def ingest_capture(
+    raw: RawPosting,
+    guard: InjectionGuard | None = None,
+    anonymizer: Anonymizer | None = None,
+    blocked_companies: Collection[str] = (),
+) -> CaptureResult:
+    """Stores one posting captured from a page open in the browser.
+
+    Same steps as a fetched posting (anonymize, guard, dedup against the
+    company's stored postings, store), except closing: a captured posting
+    has no board to disappear from, so nothing is ever marked closed.
+    Capturing an already stored posting only refreshes its last_seen.
+    """
+    if _company_key(raw.company) in {_company_key(name) for name in blocked_companies}:
+        return CaptureResult(status="blocked", raw=raw)
+    guard = guard or get_guard()
+    anonymizer = anonymizer or get_anonymizer()
+    stats = RunStats(fetched=1)
+
+    with get_session() as session:
+        ingest_run = IngestRun(started_at=datetime.now(UTC))
+        session.add(ingest_run)
+        session.flush()
+
+        company = get_or_create_company(session, raw.company)
+        source = get_or_create_source(session, raw.source)
+        (posting,) = _store_postings(
+            session,
+            company,
+            source,
+            [raw],
+            ingest_run,
+            iter_canonical_postings(session),
+            guard,
+            anonymizer,
+            stats,
+        )
+        _finish_run(ingest_run, stats)
+        return CaptureResult(
+            status="stored" if stats.stored else "already_stored",
+            raw=raw,
+            posting_id=posting.id,
+            quarantined=posting.is_quarantined,
+            duplicate_of=posting.is_duplicate_of,
+        )
+
+
+def _finish_run(ingest_run: IngestRun, stats: RunStats) -> None:
+    ingest_run.finished_at = datetime.now(UTC)
+    ingest_run.fetched_count = stats.fetched
+    ingest_run.stored_count = stats.stored
+    ingest_run.duplicate_count = stats.exact_duplicates + stats.near_duplicates
+    ingest_run.quarantined_count = stats.quarantined
 
 
 def _ingest_company(
@@ -119,19 +183,49 @@ def _ingest_company(
     company = get_or_create_company(session, company_config.name, company_config.canton_hint)
     source = get_or_create_source(session, company_config.ats)
 
-    # Every posting this run finds on the board gets the same timestamp.
+    kept = [raw for raw in raw_postings if _company_key(raw.company) not in blocked]
+    stats.blocked += len(raw_postings) - len(kept)
+    _store_postings(
+        session, company, source, kept, ingest_run, canonical_postings, guard, anonymizer, stats
+    )
+
+    # Only reached when the fetch succeeded, so a board that fails to load
+    # never closes its postings.
+    mark_closed_postings(
+        session,
+        company.id,
+        source.id,
+        {raw.external_id for raw in raw_postings},
+        ingest_run.started_at,
+    )
+
+
+def _store_postings(
+    session,
+    company: Company,
+    source: Source,
+    raw_postings: list[RawPosting],
+    ingest_run: IngestRun,
+    canonical_postings: list[Posting],
+    guard: InjectionGuard,
+    anonymizer: Anonymizer,
+    stats: RunStats,
+) -> list[Posting]:
+    """Stores one company's postings from one source, skipping those already
+    stored. Returns the stored posting for each raw posting, in order: the
+    new row, or the one already stored."""
+    # Every posting this run finds gets the same timestamp.
     now = ingest_run.started_at
+    stored: dict[str, Posting] = {}
     new_postings: list[tuple[RawPosting, GuardScanResult]] = []
     for raw in raw_postings:
-        if _company_key(raw.company) in blocked:
-            stats.blocked += 1
-            continue
         existing = find_existing_posting(session, source.id, raw.external_id)
         if existing is not None:
             # Already stored by an earlier run: only its lifecycle dates
             # change, never its text or guard verdict.
             existing.last_seen = now
             existing.closed_at = None  # back on the board, if it had left
+            stored[raw.external_id] = existing
             continue
         # PII redacted first, so the guard (and later the LLM) never sees it.
         redacted = anonymizer.anonymize(posting_text(raw.title, raw.description_html))
@@ -192,17 +286,14 @@ def _ingest_company(
             )
 
         stats.stored += 1
+        stored[raw.external_id] = posting
 
         if duplicate_of is None:
             canonical_postings.append(posting)
             company_canonicals.append(posting)
             signatures[posting.id] = signature
 
-    # Only reached when the fetch succeeded, so a board that fails to load
-    # never closes its postings.
-    mark_closed_postings(
-        session, company.id, source.id, {raw.external_id for raw in raw_postings}, now
-    )
+    return [stored[raw.external_id] for raw in raw_postings]
 
 
 def _company_key(name: str) -> str:

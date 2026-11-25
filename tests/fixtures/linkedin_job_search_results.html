@@ -1,0 +1,86 @@
+<!--
+  Hand-written stand-in for LinkedIn's newer job search layout
+  (/jobs/search-results/?currentJobId=...), as the browser renders it, with
+  the real page's structure as captured 2026-11-22 and made-up text.
+  Unlike the older layout (linkedin_job_search.html), the job list on the
+  left links each card to /jobs/view/<id>, including the selected job, and
+  comes first in the page; its card shows "Company • Location" on one line
+  and no date. The description box also holds the "… more" button.
+-->
+<html lang="en" dir="ltr">
+<head>
+  <title>Perception Engineer | Example Robotics | LinkedIn</title>
+</head>
+<body>
+  <main>
+    <div class="cfskdj cfs0g">
+      <!-- Job list (left pane): the selected job's card. -->
+      <div class="cfsjj4 cfsjkl">
+        <div class="cfskdm cfsg3i">
+          <div class="cfsjqj cfsewa">
+            <p class="cfsjq5 cfsjww">
+              <span>
+                <a class="cfsfvv cfskgu"
+                   href="https://www.linkedin.com/jobs/view/4000000001/?trackingId=abc&amp;alternateChannel=search">
+                  Perception Engineer
+                </a>
+              </span>
+            </p>
+          </div>
+          <div class="cfsjqj cfsewa">
+            <p class="cfsjq5 cfsjwp"><span>Example Robotics • Zurich, Switzerland (On-site)</span></p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div data-testid="lazy-column" class="cfsayy">
+      <!-- Job detail (right pane). -->
+      <div class="cfskdm cfsayy">
+        <div class="cfsayq" data-display-contents="true">
+          <a aria-label="Company, Example Robotics." href="https://www.linkedin.com/company/example-robotics/life/">
+            <p class="cfsjq5"><a href="https://www.linkedin.com/company/example-robotics/life/">Example Robotics</a></p>
+          </a>
+        </div>
+        <div class="cfsayq" data-display-contents="true">
+          <p class="cfsjq5 cfsjwz">
+            <a class="cfsfvv" href="https://www.linkedin.com/jobs/view/4000000001/?trackingId=abc&amp;isJobSearch=false">
+              Perception Engineer
+            </a>
+          </p>
+        </div>
+        <p class="cfsjq5 cfsjwr">
+          <span class="cfsexg">Zurich, Switzerland</span>
+          <span class="cfsjq2"></span> · <span class="cfsjq2"></span>
+          <span class="cfsexg">3 days ago</span>
+          <span class="cfsjq2"></span> · <span class="cfsjq2"></span>
+          <span class="cfsexg">Over 100 applicants</span>
+        </p>
+      </div>
+
+      <div class="cfsayy">
+        <h2 class="cfsjq5">About the job</h2>
+        <div>
+          <p>
+            <span class="cfska7" data-testid="expandable-text-box" tabindex="-1">
+              <p class="cfsjxw">We build the perception stack for autonomous inspection robots.</p>
+              <ul class="cfsjx2">
+                <li class="cfsjxt">Train and deploy object detection models in PyTorch.</li>
+              </ul>
+              <p class="cfsjxw">100% · On-site</p>
+              <button aria-hidden="true" data-testid="expandable-text-button" type="button">
+                <span><span><span class="cfsewa">…</span><span>more</span></span></span>
+              </button>
+            </span>
+          </p>
+        </div>
+      </div>
+
+      <div class="cfsayy">
+        <h2 class="cfsjq5">About the company</h2>
+        <span data-testid="expandable-text-box">Example Robotics makes legged robots for industrial sites.</span>
+      </div>
+    </div>
+  </main>
+</body>
+</html>

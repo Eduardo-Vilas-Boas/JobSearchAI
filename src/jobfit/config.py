@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -32,6 +32,10 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+psycopg://jobfit:jobfit@localhost:5432/jobfit"
     raw_storage_dir: Path = REPO_ROOT / "data" / "raw"
+    # For the guard's gated model. Read as plain HF_TOKEN (Hugging Face's own
+    # name, no JOBFIT_ prefix). Unset, Hugging Face falls back to the token
+    # saved by `hf auth login`.
+    hf_token: str | None = Field(default=None, validation_alias="HF_TOKEN")
 
 
 settings = Settings()

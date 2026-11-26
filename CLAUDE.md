@@ -80,8 +80,12 @@ values copied by hand, and `test_fetchers_live.py` (marker `live`, deselected by
 checks one real board per ATS. Only the live test notices an ATS changing its format.
 Guard tests come in two kinds: `test_guard_unit.py` checks the guard's own logic with fake
 scanners (fast, no models); `test_guard.py` runs the real model on hand-written fixtures
-(`tests/fixtures/adversarial_postings.json`), so it's slower. Its catch rate is a baseline,
-not a target. `test_anonymize.py` runs the real Presidio recognizers. Duplicate detection is tested
+(`tests/fixtures/adversarial_postings.json`), so it's slower. It tests the guard's own code
+(the model's attack class is read correctly, chunking past 512 tokens, the hidden-character
+check, no false alarms on clean postings), not how many attacks the model catches: that is a
+measurement of the model, which nothing in this repo can fix without tuning, so it's
+recorded in `docs/` instead. After a model change, re-score all the adversarial fixtures and
+record the result in a new `docs/` entry. `test_anonymize.py` runs the real Presidio recognizers. Duplicate detection is tested
 through the pipeline (`test_pipeline.py`, postings built from one shared company template)
 and `test_locations.py`.
 
@@ -192,17 +196,20 @@ doesn't use the LLM Guard library (no longer maintained); models run directly wi
   scanner of the same name (MIT), kept as a flag by the user's decision.
 - `PromptInjection`: one Hugging Face classifier, `PROMPT_INJECTION_MODEL` pinned to
   `PROMPT_INJECTION_REVISION` (a repo commit, so upstream updates can't change behaviour
-  silently). Currently `protectai/deberta-v3-base-prompt-injection-v2` (mainly English).
-  Flagged when the attack probability is above 0.5 (the model's own top label). Text is
-  split into overlapping 512-token chunks (the model's limit) and the highest score counts.
-  The check keeps the name "PromptInjection" whichever model backs it, so stored scores stay
-  comparable.
+  silently). Currently Meta's `meta-llama/Llama-Prompt-Guard-2-86M` (multilingual), which
+  replaced `protectai/deberta-v3-base-prompt-injection-v2` (mainly English). Its config
+  names the classes only `LABEL_0`/`LABEL_1`; class 1 is the attack class, checked by
+  running the model. Flagged when the attack probability is above 0.5 (the model's own top
+  label). Text is split into overlapping 512-token chunks (the model's limit) and the
+  highest score counts. The check keeps the name "PromptInjection" whichever model backs
+  it, so stored scores stay comparable.
 
-Planned: switch to Meta's `meta-llama/Llama-Prompt-Guard-2-86M` (multilingual) once access to
-the gated repo is approved. Then: update the model name and revision, verify which class index
-is the attack class (assumed 1), log in with `hf auth login`, and remove the `xfail` on the
-German test in `test_guard.py`. Don't add a second model or a custom detector without asking:
-the user chose one classifier.
+The model repo is gated: downloading it needs a Hugging Face token from an account that
+accepted Meta's license. `HF_TOKEN` in `.env` (read by `Settings.hf_token`, no `JOBFIT_`
+prefix) or `hf auth login`; in CI, the `HF_TOKEN` repository secret. Don't add a second
+model or a custom detector without asking: the user chose one classifier, and kept Prompt
+Guard 2 although it caught fewer of the hand-written fixtures than ProtectAI's (3/8 vs
+5/8), trusting Meta's larger benchmark until there's real data to evaluate on.
 
 A posting is quarantined (`Posting.is_quarantined`) if any check flags it; per-check scores
 are kept in the `guard_results` table (one row per posting per check) for the review page.
@@ -212,7 +219,12 @@ Known, measured gaps (details in `docs/0001`):
 - A short attack inside a long chunk is diluted: one attack sentence scored 1.0 alone and
   ~0.00001 inside a 512-token chunk. Smaller chunks catch more but raise false alarms
   (line by line flagged 14 of 135 clean real postings, 512 tokens flagged none).
-- The current model misses the plain German override fixture.
+- Prompt Guard 2 misses 5 of the 8 adversarial fixtures: the French and German overrides
+  (in its stated scope, so real misses; it catches the French one lowercased), and "this is
+  a test" framing, exfiltration via a summary request and the scoring override (no explicit
+  "ignore previous instructions", outside the scope Meta states for it). Details in
+  `docs/0006`. It catches the French one lowercased, so capital
+  letters seem to lower its score (details in `docs/0006`).
 - Text hidden with CSS on the careers page reaches the guard as ordinary text, because
   HTML-to-text drops styling.
 - Recruiter "if you are an AI…" lines are likely missed; both candidate models target

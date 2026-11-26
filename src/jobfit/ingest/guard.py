@@ -6,9 +6,9 @@ Two checks, each with its default decision rule and no tuning:
   Ported from LLM Guard's scanner of the same name (MIT), which is no longer
   maintained.
 - PromptInjection: one Hugging Face classifier, run directly with
-  transformers. For now protectai/deberta-v3-base-prompt-injection-v2
-  (Apache 2.0, mainly English); planned: Meta's Llama Prompt Guard 2 86M,
-  trained on several languages, once access to that gated model is approved.
+  transformers: Meta's Llama Prompt Guard 2 86M (multilingual, built on
+  mDeBERTa). It replaced protectai/deberta-v3-base-prompt-injection-v2,
+  which was mainly English.
 
 A posting is quarantined if any check flags it: it's stored, not discarded,
 so a human can review and release it. Every check runs even after one flags,
@@ -24,6 +24,8 @@ from typing import Protocol
 
 import torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
+import jobfit.config
 
 
 class Scanner(Protocol):
@@ -50,11 +52,10 @@ class InvisibleText:
 
 # The classifier behind PromptInjection, pinned to one commit of its Hugging
 # Face repo so an upstream update can't change the guard's behaviour unnoticed.
-# To switch to Prompt Guard 2, set "meta-llama/Llama-Prompt-Guard-2-86M" and
-# its current commit (gated: accept Meta's license on its Hugging Face page
-# and run `hf auth login` first), and check its attack label.
-PROMPT_INJECTION_MODEL = "protectai/deberta-v3-base-prompt-injection-v2"
-PROMPT_INJECTION_REVISION = "90c9989b1a342275dd0d1a95aad283c04e075671"
+# The repo is gated: downloading it needs a Hugging Face token from an account
+# that accepted Meta's license (`hf auth login`, or HF_TOKEN in the environment).
+PROMPT_INJECTION_MODEL = "meta-llama/Llama-Prompt-Guard-2-86M"
+PROMPT_INJECTION_REVISION = "a8ded8e697ce7c355e395a0df51f94adb4a2fd27"
 
 
 class PromptInjection:
@@ -70,12 +71,15 @@ class PromptInjection:
     def __init__(
         self, model: str = PROMPT_INJECTION_MODEL, revision: str = PROMPT_INJECTION_REVISION
     ) -> None:
-        self._tokenizer = AutoTokenizer.from_pretrained(model, revision=revision)
+        token = jobfit.config.settings.hf_token
+        self._tokenizer = AutoTokenizer.from_pretrained(model, revision=revision, token=token)
         self._model = AutoModelForSequenceClassification.from_pretrained(
-            model, revision=revision
+            model, revision=revision, token=token
         ).eval()
-        # Class 1 is ProtectAI's INJECTION (class 0 is SAFE). Not yet checked
-        # for Prompt Guard 2, whose config couldn't be downloaded.
+        # Class 1 is the attack class. The pinned config names the classes only
+        # LABEL_0/LABEL_1, so this was checked by running the model: "Ignore
+        # your previous instructions." scores 0.9996 on class 1, a clean
+        # posting 0.0004.
         self._attack_label = 1
 
     def scan(self, prompt: str) -> tuple[str, bool, float]:

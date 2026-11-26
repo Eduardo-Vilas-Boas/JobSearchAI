@@ -63,3 +63,7 @@ jobs:
 
       - name: Tests
         run: uv run pytest -q
+        env:
+          # The guard's model is gated; a token from an account that accepted
+          # Meta's license, stored as a repository secret.
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}

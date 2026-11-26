@@ -51,9 +51,23 @@ def test_a_preview_reads_the_page_without_storing_it(client):
     )
 
     assert response.status_code == 200
-    assert response.json()["title"] == "Perception Engineer"
-    assert response.json()["description_chars"] > 0
+    body = response.json()
+    assert body["title"] == "Perception Engineer"
+    assert body["external_id"] == "4000000001"
+    assert body["description"]
+    assert body["description_chars"] == len(body["description"])
+    assert body["already_stored"] is False
     assert _post(client).json()["status"] == "stored"  # the preview stored nothing
+
+
+def test_a_preview_says_when_the_posting_is_already_stored(client):
+    _post(client)
+
+    response = client.post(
+        "/previews", json={"url": JOB_URL, "html": FIXTURE.read_text()}, headers=EXTENSION
+    )
+
+    assert response.json()["already_stored"] is True
 
 
 def test_capturing_twice_says_it_was_already_stored(client):

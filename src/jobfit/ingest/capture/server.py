@@ -14,8 +14,11 @@ from datetime import UTC, datetime
 
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
+from sqlalchemy import select
 
 from jobfit.config import load_blocked_companies
+from jobfit.db.models import Posting, Source
+from jobfit.db.session import get_session
 from jobfit.ingest.anonymize import Anonymizer
 from jobfit.ingest.capture import NotAJobPosting, UnsupportedSite, parse_capture
 from jobfit.ingest.fetchers.base import RawPosting
@@ -34,14 +37,20 @@ class CaptureRequest(BaseModel):
 
 
 class PreviewResponse(BaseModel):
-    """What the parser read from the page, before anything is stored."""
+    """What the parser read from the page, before anything is stored.
 
+    `description` is the text before PII redaction, which happens on save."""
+
+    source: str
+    external_id: str
     title: str
     company: str
     location: str | None
     posted_at: datetime | None
     url: str
+    description: str
     description_chars: int
+    already_stored: bool
 
 
 class CaptureResponse(BaseModel):
@@ -65,13 +74,18 @@ def create_app(
     @app.post("/previews")
     def preview(body: CaptureRequest, request: Request) -> PreviewResponse:
         raw = _parse(body, request)
+        description = html_to_text(raw.description_html)
         return PreviewResponse(
+            source=raw.source,
+            external_id=raw.external_id,
             title=raw.title,
             company=raw.company,
             location=raw.location,
             posted_at=raw.posted_at,
             url=raw.url,
-            description_chars=len(html_to_text(raw.description_html)),
+            description=description,
+            description_chars=len(description),
+            already_stored=_is_stored(raw),
         )
 
     @app.post("/captures")
@@ -92,6 +106,18 @@ def create_app(
         )
 
     return app
+
+
+def _is_stored(raw: RawPosting) -> bool:
+    with get_session() as session:
+        return (
+            session.scalar(
+                select(Posting.id)
+                .join(Source)
+                .where(Source.name == raw.source, Posting.external_id == raw.external_id)
+            )
+            is not None
+        )
 
 
 def _parse(body: CaptureRequest, request: Request) -> RawPosting:

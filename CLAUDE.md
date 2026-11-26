@@ -135,7 +135,9 @@ returns 200 — every current entry was verified live before being committed, no
 board can return 200 with no postings (Squirro and DFINITY did on 2026-11-22).
 
 **Captures** (`jobfit.ingest.capture`): for sites with no public board API, LinkedIn first.
-The extension sends the open tab's rendered HTML and URL to the capture server; all parsing
+The extension is a side panel (toolbar icon opens it): it sends the active tab's rendered
+HTML and URL to the capture server, shows every field parsed (full description text, job id,
+whether it's already stored), and re-reads when the tab switches or its URL changes. All parsing
 is in Python (`capture/linkedin.py`), so a LinkedIn markup change is a Python fix and stored
 pages can be re-parsed. LinkedIn's class names are hashed and unstable, so the parser uses
 structure instead: `currentJobId` or `/jobs/view/<id>` for the id, the `/jobs/view/` link

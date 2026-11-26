@@ -1,12 +1,12 @@
 {
   "manifest_version": 3,
   "name": "jobfit capture",
-  "version": "0.1.0",
-  "description": "Saves the job posting open in this tab to the local jobfit pipeline.",
-  "permissions": ["activeTab", "scripting"],
-  "host_permissions": ["http://127.0.0.1:8765/*"],
-  "action": {
-    "default_title": "Save this job posting to jobfit",
-    "default_popup": "popup.html"
-  }
+  "version": "0.2.0",
+  "description": "Shows what jobfit reads from the job posting open in this tab, and saves it to the local pipeline.",
+  "minimum_chrome_version": "116",
+  "permissions": ["sidePanel", "scripting", "activeTab"],
+  "host_permissions": ["https://www.linkedin.com/*", "http://127.0.0.1:8765/*"],
+  "background": { "service_worker": "background.js" },
+  "side_panel": { "default_path": "sidepanel.html" },
+  "action": { "default_title": "Open the jobfit side panel" }
 }

@@ -1,0 +1,54 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font: 13px/1.4 system-ui, sans-serif; margin: 12px; color: #1a1a1a; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    h1 { font-size: 14px; margin: 0; }
+    dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; margin: 12px 0; }
+    dt { color: #666; }
+    dd { margin: 0; overflow-wrap: anywhere; }
+    dd.missing { color: #b00020; }
+    a { color: inherit; }
+    h2 { font-size: 13px; margin: 12px 0 4px; display: flex; justify-content: space-between; }
+    h2 span { font-weight: normal; color: #666; }
+    #description { white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid #ddd;
+      border-radius: 4px; padding: 8px; max-height: 55vh; overflow-y: auto; margin: 0;
+      font: 12px/1.45 system-ui, sans-serif; background: #fafafa; }
+    .note { color: #666; font-size: 12px; margin: 4px 0 0; }
+    button { padding: 6px 10px; font: inherit; cursor: pointer; }
+    button:disabled { cursor: default; }
+    #save { width: 100%; margin-top: 12px; }
+    #message { margin: 8px 0 0; }
+    .badge { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 11px;
+      background: #e8f5e9; color: #1b5e20; }
+    .error { color: #b00020; }
+    .ok { color: #1b5e20; }
+    .warn { color: #8a5a00; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>jobfit capture</h1>
+    <button id="refresh" title="Read the page again">Refresh</button>
+  </header>
+  <div id="fields" hidden>
+    <dl>
+      <dt>Title</dt><dd id="title"></dd>
+      <dt>Company</dt><dd id="company"></dd>
+      <dt>Location</dt><dd id="location"></dd>
+      <dt>Posted</dt><dd id="posted"></dd>
+      <dt>Job id</dt><dd id="external_id"></dd>
+      <dt>Link</dt><dd><a id="url" target="_blank"></a></dd>
+      <dt>Stored</dt><dd id="stored"></dd>
+    </dl>
+    <h2>Description <span id="chars"></span></h2>
+    <pre id="description"></pre>
+    <p class="note">As read from the page. Email addresses and phone numbers are redacted when saved.</p>
+  </div>
+  <button id="save" disabled>Save posting</button>
+  <p id="message">Reading the page…</p>
+  <script src="sidepanel.js"></script>
+</body>
+</html>

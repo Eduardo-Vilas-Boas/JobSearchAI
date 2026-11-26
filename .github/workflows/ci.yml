@@ -1,0 +1,65 @@
+# Lint and the test suite (live tests excluded) on every push and pull request,
+# the same checks as .pre-commit-config.yaml, from a clean machine.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      # Same image and credentials as docker-compose.yml. tests/conftest.py
+      # connects to localhost:5432 and creates and migrates `jobfit_test` itself.
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: jobfit
+          POSTGRES_PASSWORD: jobfit
+          POSTGRES_DB: jobfit
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U jobfit"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Python version comes from .python-version.
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      # The guard's model (about 700 MB) is pinned to a commit in guard.py, so
+      # the cache only needs refreshing when that file changes.
+      - name: Cache Hugging Face models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-${{ runner.os }}-${{ hashFiles('src/jobfit/ingest/guard.py') }}
+
+      - name: Ruff check
+        run: uv run ruff check .
+
+      - name: Ruff format
+        run: uv run ruff format --check .
+
+      - name: Tests
+        run: uv run pytest -q
